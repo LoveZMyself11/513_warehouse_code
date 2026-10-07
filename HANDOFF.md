@@ -1,262 +1,287 @@
-# 514 仓库项目交接（给 Claude）
+# 513 仓库管理系统交接
 
-> 交接日期：2026-09-18（Asia/Shanghai）  
-> 项目目录：`/Users/love_zmyself/all_school_work/514base_hub`  
-> 当前开发地址：`http://localhost:4173/`
+> 更新日期：2026-10-07（Asia/Shanghai）
+> 项目目录：`/Users/love_zmyself/all_school_work/514base_hub`
+> 本次验收地址：`http://localhost:5174/`（默认端口为 `5173`）
+> Supabase 项目：`514_warehouse_code`（产品名称：513 仓库；ref：`cvurrazwebjtfffmkymn`）
 
-这份文件描述当前真实代码状态，不代表所有规划中的功能都已经上线。接手前请先读本文件，再读 `README.md`、`src/App.tsx` 和 `supabase/schema.sql`。
+## 2026-10-07 云端发布
 
-## 一句话状态
+当前已验证版本已发布到 `https://lzmyselfai.cn/513base/`，登录为 `/513base/login`，管理台为 `/513base/app`，继续使用本项目 Supabase `cvurrazwebjtfffmkymn`。
 
-已经完成 92 张微信物品照片的视觉整理、编号和重命名，并做了一个可运行的 React/Vite 仓库管理台。管理台库存目前仍是浏览器本地存储版本，支持按货架查看、搜索、新增、查看、编辑中文名/数量、移动位置、删除和查看移动历史；已接入 Supabase Auth 客户端和受保护路由，但库存尚未切换到 Supabase，也没有借用/归还流程。
+- 发布源码和部署适配保留在独立工作树 `/Users/love_zmyself/.codex/worktrees/513base-cloud/514base_hub`；其中已带入当前主工作区未提交改动。
+- 主工作区的 `5174` 开发服务保留；ngrok 内网穿透已于 2026-10-07 按要求关闭。运行时部署改动暂未同步回主工作区。
+- 服务器版本目录 `/www/513base/releases/20261007-114747`，网站 `/www/wwwroot/lzmyselfai.cn/513base` 为指向该目录的链接。
+- 专属 Nginx 配置位于 `/www/server/panel/vhost/nginx/extension/lzmyselfai.cn/513base.conf`，回退记录位于 `/var/backups/513base/20261007-114747`。
+- 公网 Playwright 桌面和手机视口通过登录、dashboard、库存图片和路由刷新验收；未出现 JS/HTTP 错误，确认只连接本项目数据库。
+- 原个人站首页校验一致，两个原有子站和本地服务仍正常；穿透入口随后已关闭。
+- 部署脚本、重发和回退说明见独立工作树的 `deploy/README.md`。
 
-## 当前数据事实
+本次完成当前版本上云。用户后续确认的学号登录、Excel 导入、新增双重审批、管理员禁止自批及所有角色借用仍待开发，不得标记为本次已实现。
 
-- 图片：`data/` 下 92 张 JPG，均已重命名为 `ITEM0001_中文名.jpg` 至 `ITEM0092_中文名.jpg`。
-- 物品：92 条，编号连续且唯一：`ITEM0001` 到 `ITEM0092`。
-- 数量：当前全部暂记为 `若干`，没有从照片可靠推导数量。
-- 图片清单：`inventory_image_manifest.csv` 是图片映射的上游清单；`新路径` 全部有效。
-- 派生数据：`inventory.csv`、`inventory.json`、`src/inventory-data.json`、`supabase/seed.sql`。
-- 视觉状态：83 项 `已确认`，7 项名称/用途仍待核对，2 项是区域总览照片。
-- 待分层：33 项只有货架字母，暂放在 `PENDING_A/B/C/D`，没有擅自猜测层数。
-- 当前待分层分布：`PENDING_A=14`、`PENDING_B=10`、`PENDING_C=9`、`PENDING_D=0`。
-- 当前正式位置分布：`D3=13`、`D2=12`、`C4=10`、`B3=7`、`FLOOR=7`、`B4=4`、`DOOR=3`、`C3=2`、`D4=1`。
+## 当前结论
 
-### 位置编码约定
+项目已经从早期的浏览器 `localStorage` 原型升级为 React/Vite + Supabase 在线管理系统。前端已接入邮箱密码 Auth、受保护路由、RLS 权限控制和远程数据库，正式库存不再以本地存储为数据源。2026-10-06 已清理 cloud 留下的另一套 UUID/明文密码 schema，并按当前代码重建远程 public schema。
 
-正式货架层只允许：
+### 架构说明
+
+系统采用单页应用架构，登录后先进入按角色分流的 dashboard，再进入库存和业务管理台：
+
+- **super_admin**（超级管理员）：登录后进入系统总览 dashboard，可以看到全部统计数据、待审批项、公告入口等，通过快捷入口访问库存、借用、人员、部门、活动和公告管理
+- **admin**（普通管理员）：登录后进入部门工作台，可以看到本部门成员、待审批借用和活动统计
+- **member**（普通用户）：登录后进入个人工作台，可以看到可借物品、自己的借用流程和未归还提醒
+
+Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后显示按权限过滤的侧边栏。
+
+当前已经实现：
+
+- `super_admin`、`admin`、`member` 三层角色。
+- 正式库存查询，以及物品名称、编号、规格、数量、图片名称、图片路径、识别状态和位置管理。
+- 普通管理员提交库存新增、修改、删除申请；批准前不改变正式库存。普通用户只使用借用和归还流程。
+- 超级管理员直接 CRUD 正式库存，并审批库存变更申请。
+- 部门动态新增、编辑、删除。
+- 用户资料、角色、部门、职位和启用状态管理。
+- 普通管理员只管理本部门普通用户，只监管本部门借用订单。
+- 借用申请和 `待审批 -> 已批准 -> 借出中 -> 待审核归还 -> 已归还/已取消` 状态监管。
+- 普通用户可批量勾选库存填写借用单；订单支持关联活动，借出后库存显示借出摘要和实际借出时间。
+- 普通用户导航显示“借用状态”，首页在有未归还物品时显示提醒；归还必须逐件扫描货架二维码并确认已放回借出前原位，现场照片可选。
+- 管理员审核归还申请后订单才会变为已归还；借用交付、归还提交、归还确认时间由数据库记录并显示到秒。
+- 管理员可维护活动；库存勾选结果可导出为只含名称、编号、位置的 XLSX。
+- 超级管理员可发布、编辑、删除按角色定向的系统公告；dashboard 会显示当前有效公告。
+- 归还申请必须扫描并验证借出前位置对应的货架二维码（二维码内容格式为 `513-warehouse:A1`）；归还照片为可选证据。
+- 位置变化历史、操作日志及数据库分配的不重复 `ITEMxxxx` 编号。
+
+## 本次运行检查
+
+2026-10-06 已在当前工作区和远程项目完成复核：
+
+- `npm run dev -- --host 0.0.0.0` 可启动 Vite；默认地址为 `http://localhost:5173/`。本次验收因 5173 已被相邻 worktree 占用，当前工作区服务运行在 `http://localhost:5174/`。
+- `http://localhost:5174/` 和 `http://localhost:5174/login` 均返回 HTTP 200。
+- `.env.local` 已配置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_PUBLISHABLE_KEY`；本文不记录具体密钥。
+- `npx tsc --noEmit` 通过。
+- `npm run build` 通过；Vite 仍提示主包超过 500 KB，以及依赖的 `use client` module directive 警告，均不阻断构建。
+- `git diff --check` 通过。
+- 已用三个角色完成 REST 端到端流程：普通用户提交借用、管理员审批并标记借出、普通用户提交二维码位置归还申请（不上传照片）、管理员确认归还；测试订单最终为 `returned`。
+- 远程 `verify_setup.sql` 已确认 92 条库存、13 张业务表启用 RLS、公告/活动/归还 RPC 存在、归还图片 bucket 为私有、匿名用户不能读取正式库存。
+
+目前没有自动化测试、lint 或 CI 脚本；浏览器端的真实摄像头和手机文件选择仍需在目标设备补验。
+
+## 登录与测试账号
+
+登录页使用 Supabase Auth 的邮箱和密码登录：`http://localhost:5173/login`。
+
+已创建并启用以下验收账号：
+
+| 角色 | 邮箱 |
+|---|---|---|
+| `super_admin` | `superadmin.513@example.com` |
+| `admin`（宣传部） | `admin.513@example.com` |
+| `member`（宣传部） | `member.513@example.com` |
+
+这些是本地/远程验收账号，密码只在本次交接对话中提供，不写入仓库。正式部署前应删除或重置它们，并关闭公开注册（Authentication > Providers > Allow new users to sign up）。
+
+远程 Auth 中另有两个停用的历史测试 `member` 账号；正式部署前一并清理或重置。当前账号总数不是生产账号清单。
+
+新 Auth 用户默认禁用是故意的：必须由超级管理员审核角色、部门和启用状态后才能进入系统。不要把密码、`.env.local`、secret key 或 `service_role` key 写进代码、交接文件或 Git。
+
+## 角色权限
+
+| 角色 | 权限边界 |
+|---|---|
+| `super_admin`（超级管理员） | 所有后台数据管理；直接 CRUD 正式库存；审批库存变更；CRUD 部门；调整所有人员角色、部门和启用状态；监管所有部门借用订单。 |
+| `admin`（普通管理员） | 用于各部门部长/副部长；提交库存变更申请；维护本部门 `member` 资料和启用状态；查看并处理本部门借用订单；不能修改角色、部门或 Auth 绑定。 |
+| `member`（普通用户） | 查看已批准库存；提交借用申请；查看借用状态；提交二维码验证的归还申请，照片可选；不能修改正式库存或提交库存变更。 |
+
+权限由数据库 RLS 和受控 RPC 执行，不只依赖前端隐藏按钮。角色授权依据 `public.users.role` 和 `is_active`，不使用用户可编辑的 `user_metadata`。
+
+## Supabase 数据库状态
+
+最近一次远程验证已确认以下 13 张 `public` 表存在并启用 RLS：
+
+1. `inventory_locations`
+2. `inventory_items`
+3. `inventory_location_history`
+4. `departments`
+5. `users`
+6. `borrow_orders`
+7. `borrow_items`
+8. `operation_logs`
+9. `inventory_change_requests`
+10. `activities`
+11. `borrow_return_requests`
+12. `borrow_return_items`
+13. `system_announcements`
+
+远程验证结果：
+
+- `inventory_items` 有 92 条初始库存。
+- `departments` 有 8 个部门：宣传部、组织部、竞赛办公室、文体部、文艺部、红承志愿服务队、学风督导部、生活部。
+- `inventory_item_number_seq` 已同步到 92；下一次正常创建应分配 `ITEM0093`，删除的编号不复用。
+- 旧角色 `manager` 数量为 0；有效角色约束为 `super_admin`、`admin`、`member`。
+- `anon` 对正式库存没有 `SELECT` 权限。
+- 新 Auth 用户自动创建为 `member` 且 `is_active = false`。
+- 已存在 11 个受控 RPC：
+  - `create_inventory_item`
+  - `update_inventory_item`
+  - `delete_inventory_item`
+  - `review_inventory_change_request`
+  - `update_department_member`
+  - `update_borrow_order_status`
+  - `create_borrow_order`
+  - `create_borrow_order_batch`
+  - `get_inventory_borrow_status`
+  - `submit_borrow_return_request`
+  - `review_borrow_return_request`
+
+这些是 2026-10-06 已执行的远程核验结果；远程状态可再次在 SQL Editor 执行只读脚本 `supabase/verify_setup.sql` 核对。
+
+### SQL 文件
+
+- `supabase/schema_v2.sql`：完整基础结构、索引、触发器和 8 个部门初始数据。
+- `supabase/seed.sql`：92 条库存初始化数据。
+- `supabase/auth_and_rls.sql`：Auth 用户映射、三层角色、RLS、人员和借用权限。
+- `supabase/inventory_workflow.sql`：正式库存/变更申请隔离、编号 sequence、库存审批 RPC。
+- `supabase/storage_images.sql`：`inventory-images` bucket、图片类型/大小限制和按用户目录隔离的 Storage RLS。
+- `supabase/migrations/202609220001_borrow_activities.sql`：活动管理、批量借用事务、借出时间、借用摘要和相关 RLS。
+- `supabase/migrations/202609270001_borrow_returns.sql`：借用位置快照、归还申请/明细、私有照片存储、管理员核验、秒级审计时间和相关 RLS。
+- `supabase/migrations/202610060001_requirements.sql`：系统公告、货架二维码 payload、可选归还照片和相关 RLS。
+- `supabase/verify_setup.sql`：只读验收查询。
+
+开发库从空库重建时按 `schema_v2.sql`、`seed.sql`、`auth_and_rls.sql`、`inventory_workflow.sql`、`storage_images.sql` 顺序执行，最后执行 `verify_setup.sql`。现网项目已完成重建，后续只执行审核后的 migration 和 `verify_setup.sql`，不要直接重跑带结构变更或 seed 的基础脚本。
+
+## 前端与业务实现
+
+主要文件：
+
+- `src/main.tsx`：Router、AuthProvider、受保护路由。
+- `src/RoleDashboard.tsx`：按角色分流的系统管理员、部门管理员和普通用户工作台。
+- `src/auth/AuthProvider.tsx`：Supabase session 和 `public.users` 资料加载。
+- `src/auth/LoginPage.tsx`：邮箱密码登录。
+- `src/auth/ProtectedRoute.tsx`：未登录跳转、未关联/停用账号拦截。
+- `src/App.tsx`：库存、审批、人员、部门和借用管理 UI。
+- `src/lib/supabase.ts`：Supabase 客户端初始化。
+- `src/styles.css`：桌面和移动端样式。
+
+前端一次加载正式库存、位置历史、变更申请、部门、可见用户、借用订单、归还申请和归还明细。RLS 根据当前用户角色和部门过滤实际可见数据。归还照片使用私有 bucket 和短时签名 URL。
+
+库存写入规则：
+
+- 超级管理员通过 RPC 直接新增、修改、删除正式库存。
+- 普通管理员按既有流程写入 `inventory_change_requests`；普通用户页面与数据库策略均不开放库存变更申请。
+- 超级管理员批准后，RPC 才把请求同步到 `inventory_items`。
+- 正式库存与待审批请求是不同表，页面统计只把已批准数据算作库存。
+
+初始 92 项图片仍由仓库内 `data/` 静态提供，数据库中的旧 `image_path` 仍是 `/data/...` 路径；新增或替换图片可通过管理台上传到 Supabase Storage 的 `inventory-images` bucket，上传后的 `image_path` 为公开 URL。
+
+## 当前库存数据事实
+
+- 初始物品编号为 `ITEM0001` 至 `ITEM0092`，共 92 条。
+- `data/` 中包含 92 张物品 JPG，另有目录占位文件，因此文件总数会大于 92。
+- 33 项仍位于 `PENDING_A/B/C/D`，只确认了货架字母，尚未确认具体层数。
+- 7 项名称/用途仍需人工复核：`ITEM0003`、`ITEM0009`、`ITEM0018`、`ITEM0059`、`ITEM0069`、`ITEM0082`、`ITEM0084`。
+- `ITEM0079`、`ITEM0091` 是区域总览照片，需要决定保留为物品、拆分还是改为场景资料。
+- 初始数量目前多数为“若干”，不能视为真实盘点数量。
+- 不要把 `PENDING_A` 等待分层位置改写成 `A0/B0/C0/D0`。
+
+上游图片清单为 `inventory_image_manifest.csv`。`tools/generate_inventory_assets.py` 会重新生成前端数据和 seed，但会把数量重置为“若干”，因此不能用它覆盖已经在线发生的业务修改。
+
+## 账号 Excel 模板
+
+统一模板位于：
+
+`outputs/2026-09-21-account-import-template/account_import_template.xlsx`
+
+模板包含 115 个账号名额：5 个超级管理员、10 个普通管理员、100 个普通用户，并包含部门选项和填写说明。
+
+该文件只是批量整理/导入模板，当前代码没有自动创建 Supabase Auth 用户的导入器，模板内容也尚未代表真实账号已经生成。正式导入时必须安全生成初始密码、创建 Auth 用户、关联 `public.users`，并要求首次登录改密；密码不能提交到 Git。
+
+## Git 状态
+
+- 当前分支：`main`，跟踪 `origin/main`。
+- Git 远程仓库：`https://github.com/LoveZMyself11/514_warehouse_code.git`；Supabase 项目名为 `514_warehouse_code`（产品名称为 513 仓库）。
+- `HEAD` 与 `origin/main` 仍在 `1dde4c9 Require approval for new Auth users`；当前工作区保留 cloud 改动和本次修复，尚未提交或推送。
+- 2026-10-06 已通过 Supabase CLI 将远程数据库重建为当前 schema，迁移历史已修复为 `202609220001`、`202609270001`、`202610060001`。
+- `.env.local`、`dist/`、Supabase 临时目录和 Excel 预览/检查产物已由 `.gitignore` 排除。
+
+## 云端迁移、账号与后续事项
+
+以下迁移已在远程 Supabase 项目执行并通过 `verify_setup.sql`：
 
 ```text
-A1 A2 A3 A4
-B1 B2 B3 B4
-C1 C2 C3 C4
-D1 D2 D3 D4
+supabase/migrations/202609220001_borrow_activities.sql
+supabase/migrations/202609270001_borrow_returns.sql
+supabase/migrations/202610060001_requirements.sql
 ```
 
-其他正式区域是 `FLOOR`（地板）和 `DOOR`（门后）。`PENDING_A` 到 `PENDING_D` 是“已知货架、尚未知道具体层”的工作队列，不是第 0 层，也不是正式货架层号。不要重新引入 `A0/B0/C0/D0`。
+`missing_required_tables` 为空，归还字段与 RPC 均存在，`borrow_return_image_bucket.public` 为 `false`。
 
-### 仍需人工确认的项目
+1. 已完成：三个验收账号已创建并启用：`superadmin.513@example.com`（super_admin）、`admin.513@example.com`（宣传部 admin）、`member.513@example.com`（宣传部 member）。密码只在本次交接对话中提供，不写入仓库。
+2. 待部署前完成：在 Supabase Dashboard 关闭公开注册（Allow new users to sign up），并按部署环境重新检查 Auth 设置；本次未把该开关作为已验证事实记录。
+3. 已完成：三类账号已完成借用申请、管理员审批/交付、二维码位置归还申请和管理员确认归还验收。
+4. 待人工：现场确认 33 个待分层物品、7 个待识别名称、2 个区域总览项以及所有真实数量/规格。
+5. 待规划：决定并实现 115 个账号的受控批量导入流程；Excel 模板本身不会创建账号。
+6. 待设备验收：在真实手机浏览器上完成拍照、相册、超限文件和上传失败验收；现有 92 项 `/data/...` 图片仍未迁移，需单独规划批量上传和 URL 更新。
+7. 已完成当前版本静态部署：域名、HTTPS、环境变量和子路径路由已验收；真实移动网络连接质量仍需持续观察。
+8. 待工程化：增加自动化测试、lint、CI 和主包代码分包。
 
-| 编号 | 当前名称 | 当前来源位置 | 状态 |
-|---|---|---|---|
-| `ITEM0003` | 充气活动道具 | A? / `PENDING_A` | 待确认具体类型 |
-| `ITEM0009` | 折叠桌收纳包 | A? / `PENDING_A` | 待确认是否含桌具 |
-| `ITEM0018` | 绿色袋装服装 | B? / `PENDING_B` | 待确认具体服装 |
-| `ITEM0059` | 红色罐装喷剂 | D2 | 待确认具体用途 |
-| `ITEM0069` | 透明塑料扎带 | D3 | 待确认具体类型 |
-| `ITEM0082` | 展架支撑杆 | FLOOR | 待确认具体展架 |
-| `ITEM0084` | 黑色卷筒物料 | FLOOR | 待确认具体类型 |
-
-区域总览照片：`ITEM0079`（落地宣传牌与配重）和 `ITEM0091`（宣传横幅与展板）。后续需要决定它们是保留为库存项、拆成多个物品，还是改为纯位置/场景照片。
-
-最近已根据视觉复核修正：
-
-- `ITEM0062`：`迷彩油彩`
-- `ITEM0088`：`拾物夹`
-- `ITEM0089`：`不锈钢伸缩杆`
-
-## 前端现状
-
-技术栈：Vite + React 19 + TypeScript + `lucide-react`。
-
-主要入口：
-
-- `src/main.tsx`：React 入口。
-- `src/App.tsx`：目前几乎全部管理台业务逻辑和 UI。
-- `src/styles.css`：桌面与手机响应式样式。
-- `src/types.ts`：`InventoryItem`、`LocationHistory` 类型。
-- `src/locations.ts`：A-D 四个货架的 1-4 层、FLOOR、DOOR、PENDING 位置定义。
-- `src/inventory-data.json`：前端初始种子。
-
-已实现：
-
-- 全部物品、A/B/C/D 货架、具体 1-4 层、FLOOR、DOOR、待分层筛选。
-- 按名称、`ITEM` 编号、位置搜索。
-- 新增物品。
-- 查看详情和图片。
-- 编辑中文名称、数量、位置。
-- 删除物品。
-- 位置变化历史：记录原位置、新位置、时间。
-- 物品 `ITEMxxxx` 编号在编辑界面不可修改；新增编号从当前最大编号之后递增，删除后不复用。
-- 桌面和 390px 手机布局均已检查，无横向溢出。
-
-### 当前持久化边界
-
-管理台目前只使用浏览器 `localStorage`：
-
-```text
-key = 514base-inventory-v3
-value = { version, items, history, lastIssuedNumber }
-```
-
-因此：
-
-- 同一浏览器可保留改名、移动、新增和删除结果。
-- 换浏览器、换设备或清除站点数据不会共享这些修改。
-- UI 修改不会回写 `inventory.csv`、`inventory.json`、manifest 或 SQL。
-- 已存在的 localStorage 会优先于新的 `src/inventory-data.json`；接手开发时要先决定是否迁移或清空本地状态。
-- 当前 UI 删除会连同该物品的本地移动历史一起删除；如果未来需要审计留痕，应改成软删除或保留历史。
-- 新增物品没有图片上传，`imagePath` 为空时显示占位图。
-- 名称识别状态不能在 UI 中修改，只能编辑名称/数量/位置。
-
-当前 `InventoryStore` 接口中的 `version` 仍写作 `2`，但 storage key 已经是 `v3`；这是小的技术债，做存储迁移时应统一版本号并增加 schema migration。
-
-## 数据生成和图片处理
-
-### 当前推荐数据链
-
-```text
-inventory_image_manifest.csv
-        |
-        v
-tools/generate_inventory_assets.py
-        |
-        +--> src/inventory-data.json
-        +--> inventory.json
-        +--> inventory.csv
-        +--> supabase/seed.sql
-```
-
-运行生成脚本：
+## 常用命令
 
 ```bash
-python3 tools/generate_inventory_assets.py
-```
-
-注意：脚本会把数量统一生成成 `若干`，并刷新所有记录的 `createdAt` / `updatedAt`。它适合初始化或重新生成派生文件，不适合覆盖已经发生的业务编辑。
-
-### 不要直接运行的脚本
-
-`rename_inventory_images.py` 是一次性重命名脚本。它仍以原始微信文件名为输入，而原始文件已经被重命名；再次运行会因为源文件不存在或目标文件已存在而失败。若需要再次改名，先逐项确认当前文件，再安全地执行 `mv`，同步修改 manifest、脚本元数据，最后重新生成派生数据。
-
-`wechat_inventory_processor.py` 是早期“手动粘贴聊天文本”的原型，不是当前 92 项资产的数据源。它会生成/覆盖旧格式的 `inventory.csv`、`inventory.json`，而且位置处理逻辑与当前图片清单流程不一致。不要用它重建当前库存。
-
-manifest 的 `原始路径` 仍记录重命名前的微信文件名，当前这些原始路径大多不存在；使用时以 `新路径` 为准。
-
-## Supabase 当前状态
-
-数据库库存结构已经准备但尚未接入前端 CRUD：
-
-- `supabase/schema.sql`：
-  - `inventory_locations`
-  - `inventory_items`
-  - `inventory_location_history`
-  - 位置更新 trigger，自动写移动历史
-- `supabase/seed.sql`：92 条初始化 upsert。
-
-执行顺序：先执行 `schema.sql`，再执行 `seed.sql`。
-
-当前没有：
-
-- 前端查询/写入 API。
-- Storage bucket、图片上传和远程图片 URL。
-- Realtime 同步。
-- 借用/归还记录。
-
-当前 Auth 状态：
-
-- 已安装并固定 `@supabase/supabase-js`，Supabase URL 已写入 `.env.local` 和 `.env.example`。
-- publishable key 尚未提供，`.env.local` 中该值保持为空；不要使用 secret key 或 `service_role` key。
-- `/login` 提供邮箱/密码登录，`/` 通过 React Router guard 保护，管理台顶部可退出登录。
-- 前端不开放自行注册。需要在 Supabase Dashboard 中关闭公开注册，并邀请或创建账户。
-- `supabase/auth_and_rls.sql` 已准备 authenticated policies 和受保护的位置历史 trigger，但尚未在远程项目执行。
-
-`seed.sql` 中的 `image_path` 仍是站点本地路径 `/data/...`，不是 Supabase Storage URL。接入 Storage 后需要先上传图片、建立 bucket policy，再回填公共 URL 或签名 URL。
-
-### 接 Supabase 时必须处理的数据库问题
-
-1. 目前新增编号依赖浏览器的 `lastIssuedNumber + 1`，多用户并发会撞号。应改为数据库 sequence/RPC/事务分配。
-2. 当前本地新建物品的 `sourceSequence` 写成 `0`；数据库中该字段有 unique 约束，正式接入时应对人工录入使用 `NULL`，不要重复写 0。
-3. 需要设计 RLS 和身份模型，不能把没有权限控制的表直接暴露给公网。
-4. 需要决定删除是硬删除还是软删除；当前 schema 与 localStorage 都会删除移动历史（数据库通过 `ON DELETE CASCADE`）。
-5. `PENDING_*` 是工作流状态。如果最终要求数据库只允许正式位置，应改成独立的 `shelf_code` + 可空 `level`，而不是把 PENDING 当成正式位置码。
-6. README 早期示例里的 `items` / `borrow_records` 表与实际 `inventory_*` schema 不一致，接手时不要按旧示例直接建表。
-
-## 运行和验证
-
-环境曾验证：Node `v25.9.0`、npm `11.12.1`。依赖已经安装，但重新进入环境仍应执行：
-
-```bash
+cd /Users/love_zmyself/all_school_work/514base_hub
 npm install
-```
-
-开发服务：
-
-```bash
 npm run dev
-```
-
-默认端口是 5173。当前交接时已有服务运行在 4173，若需复用：
-
-```bash
-npm run dev -- --port 4173
-```
-
-生产构建和预览：
-
-```bash
 npx tsc --noEmit
 npm run build
-npm run preview -- --port 4174
+npm run preview
 ```
 
-`npm run build` 会执行 `vite build && cp -R data dist/data`，所以构建产物包含约 64MB 图片。构建时可能出现 lucide-react 的 `use client` module-level warning，这是当前非致命 warning，不影响构建结果。
+开发服务默认端口为 5173。若已有服务占用该端口，先确认进程属于本项目，不要直接终止未知进程。
 
-已做过的验证：
+## 安全约束
 
-- `npx tsc --noEmit` 通过。
-- `npm run build` 通过。
-- 92 条数据、92 张图片、连续 ID、无重复 ID、无缺图、无 `A0-D0` 通过脚本校验。
-- 桌面 1280px 和手机 390px 浏览器检查通过。
-- 真实操作验证过编辑名称、移动到 `A1`、位置历史、新增 `ITEM0093`；测试数据未写入最终种子，最终页面恢复为 92 条。
-- 浏览器控制台无错误。
+- 前端只能使用 Supabase publishable key，不得使用 secret 或 `service_role` key。
+- 不要提交 `.env.local`、账号密码、初始密码表或密钥。
+- 不要仅靠前端按钮控制权限；任何新增写操作都必须有对应 RLS 或受控 RPC。
+- 新用户保持默认禁用，必须经过管理员分配角色、部门并启用。
+- 正式库存与变更请求必须继续隔离，审批前不得更新 `inventory_items`。
+- 不要重跑一次性图片重命名脚本，也不要用旧原型脚本覆盖当前派生数据。
 
-当前没有自动化测试、lint 或 CI 脚本。
+## 2026-09-22 移动端与图片上传改进
 
-## 推荐接手顺序
+### 已完成修改
 
-### 第一阶段：锁定业务语义和现场数据
+1. **物品编号自动生成提示** (Task #3 已完成)
+   - 在创建物品表单顶部增加绿色提示框，明确说明"物品编号将由系统自动生成（如 ITEM0093），无需手动填写"
+   - 编辑模式保持显示编号字段（disabled 状态），创建模式不显示
+   - 样式：`.info-notice` 类使用 `#e0f0e9` 背景色和 `#176b50` 文字色，与现有配色一致
 
-- 确认永久不变的是物品 `ITEMxxxx` 编号，而不是货架位置码。
-- 现场为 33 项 `PENDING_*` 物品分配具体 1-4 层。
-- 核对 7 项待确认名称/用途。
-- 决定 `ITEM0079`、`ITEM0091` 是否是库存项还是场景照片。
-- 盘点数量，将 `若干` 替换为真实数量或设计可用单位字段。
+2. **移动端图片上传支持** (Task #2 已完成)
+   - 新增物品表单使用 `accept="image/jpeg,image/png,image/webp,image/heic,image/heif"` 与 `capture="environment"`
+   - 移动端可通过拍照或相册选择图片，前端限制 10 MB，Storage bucket 也强制相同大小与 MIME 限制
+   - 上传路径按 `inventory/{当前 Auth 用户 ID}/` 隔离，避免用户写入其他用户目录
+   - 文件名包含物品名称、时间戳和随机后缀；上传成功后自动填充 `imageName` 和 `imagePath`
+   - 选图后显示预览；提交失败会尝试删除刚上传的临时文件，避免留下孤立对象
+   - 编辑模式保留原有的文本输入字段（图片文件名、图片路径），供手动调整
 
-### 第二阶段：做数据迁移和在线化
+3. **移动端侧边栏适配** (Task #1 - 已存在)
+   - 检查确认 `@media (max-width: 900px)` 断点已实现
+   - 侧边栏在移动端以固定定位的抽屉形式展开，宽度 `min(290px, 88vw)`
+   - 包含 `.mobile-menu` 按钮（顶栏左侧）和 `.close-nav` 按钮（侧边栏顶部）
+   - `.nav-backdrop` 半透明遮罩层（`rgba(15, 28, 24, .42)`）点击关闭
 
-- 明确是否需要导出当前浏览器 localStorage 的修改。
-- 配置 Supabase 项目、环境变量、Storage bucket、认证和 RLS。
-- 将前端读写从 localStorage 切换到 Supabase。
-- 用数据库原子策略分配新 ITEM 编号。
-- 将图片上传到 Storage 并更新 URL。
-- 增加 loading/error/空状态和离线策略。
+### 待验证事项
 
-### 第三阶段：扩展仓库业务
+- **Supabase Storage 策略验收**：已由 `supabase/verify_setup.sql` 确认 bucket、上传策略和删除策略均生效
+- **移动端实际测试**：需在真实手机浏览器中验证拍照/相册选择功能
+- **现有图片迁移**：当前 92 项 `/data/...` 图片未迁移，需单独规划批量上传和 URL 更新
 
-- 借用、归还、逾期和借用人记录（README 背景提到，但当前尚未实现）。
-- 角色权限：管理员、仓库管理员、普通查询/借用用户。
-- 导入/导出、备份、操作审计。
-- 图片上传、替换和批量更新。
-- 服务器和现有域名部署，验证国内访问和 Supabase 网络可达性。
+### 代码变更位置
 
-## 接手时的安全规则
+- `src/App.tsx`：移动端图片校验、预览、Storage 上传、失败清理和编号提示
+- `src/styles.css`：移动端抽屉与图片预览样式
+- `supabase/storage_images.sql`：Storage bucket 与 RLS 策略
 
-- 不要重跑 `rename_inventory_images.py`。
-- 不要运行 `wechat_inventory_processor.py` 覆盖当前派生数据。
-- 不要把 `PENDING_A` 解释为 `A0`。
-- 不要在改名或移动时生成新的 ITEM 编号。
-- 修改 manifest 后，检查图片实际文件名，再运行生成脚本和完整校验。
-- 没有确认 Supabase 迁移策略前，不要清除用户浏览器里的 `514base-inventory-v3`。
-- 当前目录不是 Git 仓库，没有提交历史可回滚；接手后建议先建立 `.gitignore`（至少忽略 `node_modules/`、`dist/`、`.DS_Store`、`.env*`），再初始化版本库。
+### 后续建议
 
-## 接手验收清单
-
-- [ ] 读取本文件、README、App、schema 和 manifest。
-- [ ] 启动本地页面并确认首页显示 92 件物品。
-- [ ] 确认货架层只显示 1、2、3、4。
-- [ ] 确认 `PENDING_*` 单独显示为待分层，不显示为 0 层。
-- [ ] 确认编辑名称或位置不会改变 ITEM 编号。
-- [ ] 确认位置移动历史可见。
-- [ ] 决定 localStorage 修改是否需要迁移。
-- [ ] 决定 Supabase 接入和借还功能的优先级后再大规模重构。
+1. 在真实手机上完成拍照、相册、超限文件和上传失败验收
+2. 如需降低流量，再增加客户端图片压缩和上传进度指示器

@@ -22,7 +22,7 @@ function App() {
       {/* 主要内容 */}
       <div className={`main-content ${isLoading ? 'hidden' : 'visible'}`}>
         <div className="app-container">
-          <h1>514 仓库管理系统</h1>
+          <h1>513 仓库管理系统</h1>
           <p>院徽加载动画演示</p>
 
           <button

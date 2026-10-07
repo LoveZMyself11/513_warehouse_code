@@ -50,7 +50,22 @@ export interface Department {
   createdAt: string;
 }
 
-export type BorrowOrderStatus = "pending" | "approved" | "borrowed" | "returned" | "cancelled";
+export type ActivityStatus = "draft" | "active" | "archived";
+
+export interface Activity {
+  id: number;
+  name: string;
+  description: string;
+  departmentId: number | null;
+  status: ActivityStatus;
+  startDate: string | null;
+  endDate: string | null;
+  createdBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type BorrowOrderStatus = "pending" | "approved" | "borrowed" | "return_requested" | "returned" | "cancelled";
 
 export interface BorrowOrder {
   id: number;
@@ -58,6 +73,9 @@ export interface BorrowOrder {
   userId: number;
   departmentId: number | null;
   status: BorrowOrderStatus;
+  activityId: number | null;
+  borrowedAt: string | null;
+  returnSubmittedAt: string | null;
   reason: string | null;
   expectedReturnDate: string | null;
   actualReturnDate: string | null;

@@ -26,7 +26,7 @@ export default function ProtectedRoute() {
         <section className="auth-panel access-panel" aria-labelledby="access-title">
           <div className="auth-brand">
             <div className="brand-mark"><Boxes size={22} /></div>
-            <div><strong>514 仓库</strong><span>物品管理台</span></div>
+            <div><strong>513 仓库</strong><span>物品管理台</span></div>
           </div>
           <div className="access-message">
             <ShieldAlert size={30} />

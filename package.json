@@ -1,5 +1,5 @@
 {
-  "name": "514base-inventory",
+  "name": "513base-inventory",
   "private": true,
   "version": "1.0.0",
   "scripts": {
@@ -10,6 +10,7 @@
   "dependencies": {
     "@supabase/supabase-js": "2.116.0",
     "@vitejs/plugin-react": "latest",
+    "exceljs": "4.4.0",
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",

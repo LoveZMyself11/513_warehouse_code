@@ -198,7 +198,7 @@ function App() {
 
   return (
     <>
-      {firstLoad && <VideoLogoLoader text="欢迎使用 514 仓库系统" />}
+      {firstLoad && <VideoLogoLoader text="欢迎使用 513 仓库系统" />}
       <MainContent />
     </>
   );

@@ -42,7 +42,7 @@ export default function LoginPage() {
         <div className="auth-brand">
           <div className="brand-mark"><Boxes size={22} /></div>
           <div>
-            <strong>514 仓库</strong>
+            <strong>513 仓库</strong>
             <span>物品管理台</span>
           </div>
         </div>
