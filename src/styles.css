@@ -486,8 +486,8 @@ code { color: #385148; font-family: "SFMono-Regular", Consolas, monospace; font-
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 5px 18px;
+  flex-direction: column;
+  gap: 2px;
   margin: 28px auto 0;
   padding: 12px 0 2px;
   border-top: 1px solid #dce2de;
@@ -604,7 +604,7 @@ code { color: #385148; font-family: "SFMono-Regular", Consolas, monospace; font-
   .dashboard-panel { padding: 16px; }
   .dashboard-action-list { grid-template-columns: 1fr; }
   .dashboard-footer-links { margin-top: 10px; }
-  .legal-footer { gap: 4px 12px; margin-top: 20px; padding-top: 10px; font-size: 10px; }
+  .legal-footer { gap: 3px; margin-top: 20px; padding-top: 10px; font-size: 10px; }
   .topbar { height: 60px; gap: 9px; }
   .app-shell { grid-template-rows: 60px 1fr; }
   .brand-mark { width: 32px; height: 32px; }
