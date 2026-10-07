@@ -36,8 +36,11 @@ import {
 } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "./auth/AuthProvider";
+import { locationLabel, locations, parseLocationQr } from "./locations";
+import type { IScannerControls } from "@zxing/browser";
+import DeveloperContact from "./components/DeveloperContact";
+import AccountImport from "./components/AccountImport";
 import { assetUrl } from "./lib/assetUrl";
-import { locationLabel, locations } from "./locations";
 import type {
   Activity,
   ActivityStatus,
@@ -95,6 +98,10 @@ interface DbRequestRow {
   reviewed_by: number | null;
   review_note: string | null;
   created_at: string;
+  requested_role: UserRole;
+  requested_department_id: number | null;
+  department_review_status: InventoryChangeRequest["departmentReviewStatus"];
+  super_review_status: InventoryChangeRequest["superReviewStatus"];
 }
 
 interface DbDepartmentRow {
@@ -160,6 +167,10 @@ interface DbBorrowOrderRow {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  borrower_role: UserRole;
+  return_delegate_id: number | null;
+  return_delegate_name: string | null;
+  return_delegate_student_id: string | null;
 }
 
 interface DbBorrowItemRow {
@@ -183,6 +194,7 @@ interface DbBorrowReturnRequestRow {
   reviewed_at: string | null;
   review_note: string | null;
   notes: string | null;
+  submitted_by: number | null;
 }
 
 interface DbBorrowReturnItemRow {
@@ -211,6 +223,7 @@ interface DbBorrowSummaryRow {
 }
 
 const isPendingLocation = (code: string) => code.startsWith("PENDING_");
+const isPhysicalLocation = (code: string) => parseLocationQr(`513-warehouse:${code}`) !== null;
 const isShelf = (selection: string) => /^[A-D]$/.test(selection);
 const IMAGE_BUCKET = "inventory-images";
 const RETURN_IMAGE_BUCKET = "borrow-return-images";
@@ -279,7 +292,7 @@ const mapItem = (row: DbInventoryRow): InventoryItem => ({
   specification: row.specification ?? "",
   quantity: row.quantity,
   imageName: row.image_name ?? "",
-  imagePath: row.image_path ?? "",
+  imagePath: assetUrl(row.image_path ?? ""),
   recognitionStatus: row.recognition_status,
   status: inventoryStatus(row.recognition_status),
   sourceSequence: row.source_sequence ?? 0,
@@ -312,6 +325,10 @@ const mapRequest = (row: DbRequestRow): InventoryChangeRequest => ({
   reviewedBy: row.reviewed_by,
   reviewNote: row.review_note,
   createdAt: row.created_at,
+  requestedRole: row.requested_role,
+  requestedDepartmentId: row.requested_department_id,
+  departmentReviewStatus: row.department_review_status,
+  superReviewStatus: row.super_review_status,
 });
 
 const mapDepartment = (row: DbDepartmentRow): Department => ({
@@ -364,6 +381,10 @@ const mapBorrowOrder = (row: DbBorrowOrderRow): BorrowOrder => ({
   notes: row.notes,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+  borrowerRole: row.borrower_role,
+  returnDelegateId: row.return_delegate_id,
+  returnDelegateName: row.return_delegate_name,
+  returnDelegateStudentId: row.return_delegate_student_id,
 });
 
 const statusMeta = (item: InventoryItem) => {
@@ -400,7 +421,7 @@ const borrowStatusMeta: Record<BorrowOrderStatus, { label: string; className: st
 };
 
 const nextBorrowStatuses = (status: BorrowOrderStatus): BorrowOrderStatus[] => {
-  if (status === "pending") return ["approved", "cancelled"];
+  if (status === "pending") return ["borrowed", "cancelled"];
   if (status === "approved") return ["borrowed", "cancelled"];
   return [];
 };
@@ -491,10 +512,10 @@ function App() {
   const [returnLocationChecks, setReturnLocationChecks] = useState<Record<number, boolean>>({});
   const [scannedLocations, setScannedLocations] = useState<Record<number, string>>({});
   const [scanLineId, setScanLineId] = useState<number | null>(null);
-  const [scanPayload, setScanPayload] = useState("");
   const [scanError, setScanError] = useState<string | null>(null);
   const scanVideoRef = useRef<HTMLVideoElement>(null);
-  const scanStreamRef = useRef<MediaStream | null>(null);
+  const [delegateOrderId, setDelegateOrderId] = useState<number | null>(null);
+  const [locationCorrectionLineId, setLocationCorrectionLineId] = useState<number | null>(null);
   const [returnReviewRequestId, setReturnReviewRequestId] = useState<number | null>(null);
   const [returnReviewNote, setReturnReviewNote] = useState("");
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -514,7 +535,7 @@ function App() {
       client.from("borrow_orders").select("*").order("created_at", { ascending: false }),
       client.from("borrow_items").select("*").order("id"),
       client.rpc("get_inventory_borrow_status", { p_item_ids: null }),
-      client.from("borrow_return_requests").select("id, order_id, user_id, status, submitted_at, reviewed_by, reviewed_at, review_note, notes").order("submitted_at", { ascending: false }),
+      client.from("borrow_return_requests").select("id, order_id, user_id, status, submitted_at, reviewed_by, reviewed_at, review_note, notes, submitted_by").order("submitted_at", { ascending: false }),
       client.from("borrow_return_items").select("id, return_request_id, borrow_item_id, item_id, original_location_code, returned_location_code, photo_path, item_condition, notes, created_at").order("id"),
       client.from("system_announcements").select("id, title, content, target_role, is_active, starts_at, ends_at, created_by, created_at, updated_at").order("created_at", { ascending: false }),
     ]);
@@ -592,40 +613,33 @@ function App() {
   }, [mobileNavOpen]);
 
   useEffect(() => {
-    if (scanLineId === null) return;
+    if (scanLineId === null || returnEditorOrderId === null) return;
     let stopped = false;
+    let controls: IScannerControls | undefined;
+    const video = scanVideoRef.current;
     const startScanner = async () => {
       setScanError(null);
       if (!navigator.mediaDevices?.getUserMedia) {
-        setScanError("当前浏览器不支持摄像头扫码，请在下方输入二维码内容。 ");
+        setScanError("无法使用摄像头，请通过 HTTPS 在手机浏览器中打开并允许相机访问。");
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-        if (stopped) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        scanStreamRef.current = stream;
-        if (scanVideoRef.current) {
-          scanVideoRef.current.srcObject = stream;
-          await scanVideoRef.current.play();
-        }
-        const Detector = (window as Window & { BarcodeDetector?: new (options?: { formats?: string[] }) => { detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
-        if (!Detector) {
-          setScanError("当前浏览器没有 QR 扫码 API，请在下方输入二维码内容。");
-          return;
-        }
-        const detector = new Detector({ formats: ["qr_code"] });
-        while (!stopped && scanLineId !== null && scanVideoRef.current) {
-          const results = await detector.detect(scanVideoRef.current);
-          const value = results[0]?.rawValue;
-          if (value) {
-            setScanPayload(value);
-            break;
-          }
-          await new Promise((resolve) => window.setTimeout(resolve, 250));
-        }
+        const { BrowserQRCodeReader } = await import("@zxing/browser");
+        if (stopped || !video) return;
+        const reader = new BrowserQRCodeReader(undefined, { delayBetweenScanAttempts: 250 });
+        controls = await reader.decodeFromConstraints(
+          { video: { facingMode: { ideal: "environment" } }, audio: false },
+          video!,
+          (result, _error, scanner) => {
+            if (!result || stopped) return;
+            const line = borrowItems.find((candidate) => candidate.id === scanLineId);
+            if (line && confirmShelfScan(line, result.getText())) {
+              stopped = true;
+              scanner.stop();
+            }
+          },
+        );
+        if (stopped) controls.stop();
       } catch (scannerError) {
         if (!stopped) setScanError(errorMessage(scannerError));
       }
@@ -633,11 +647,12 @@ function App() {
     void startScanner();
     return () => {
       stopped = true;
-      scanStreamRef.current?.getTracks().forEach((track) => track.stop());
-      scanStreamRef.current = null;
-      if (scanVideoRef.current) scanVideoRef.current.srcObject = null;
+      controls?.stop();
+      const stream = video?.srcObject;
+      if (stream instanceof MediaStream) stream.getTracks().forEach((track) => track.stop());
+      if (video) video.srcObject = null;
     };
-  }, [scanLineId]);
+  }, [scanLineId, returnEditorOrderId, borrowItems]);
 
   const counts = useMemo(() => {
     const byLocation = new Map<string, number>();
@@ -660,10 +675,11 @@ function App() {
   );
   const activeActivities = useMemo(() => activities.filter((activity) => activity.status === "active"), [activities]);
   const selectedItems = useMemo(
-    () => items.filter((item) => selectedItemIds.has(item.id) && !borrowSummaryByItem.has(item.id)),
+    () => items.filter((item) => selectedItemIds.has(item.id) && !borrowSummaryByItem.has(item.id) && isPhysicalLocation(item.locationCode)),
     [borrowSummaryByItem, items, selectedItemIds],
   );
-  const selectedVisibleCount = visibleItems.filter((item) => selectedItemIds.has(item.id) && !borrowSummaryByItem.has(item.id)).length;
+  const availableVisibleItems = visibleItems.filter((item) => !borrowSummaryByItem.has(item.id) && isPhysicalLocation(item.locationCode));
+  const selectedVisibleCount = availableVisibleItems.filter((item) => selectedItemIds.has(item.id)).length;
 
   const pendingLocationCount = items.filter((item) => isPendingLocation(item.locationCode)).length;
   const reviewCount = items.filter((item) => item.status === "pending").length;
@@ -696,6 +712,7 @@ function App() {
   const returnItemsForOrder = returnEditorOrder
     ? borrowItems.filter((line) => line.order_id === returnEditorOrder.id && line.quantity_returned < line.quantity_borrowed)
     : [];
+  const activeScanLine = returnItemsForOrder.find((line) => line.id === scanLineId);
   const returnReviewRequest = borrowReturnRequests.find((request) => request.id === returnReviewRequestId) ?? null;
   const returnReviewItems = returnReviewRequest ? (returnItemsByRequest.get(returnReviewRequest.id) ?? []) : [];
   const visibleManagedUsers = isSuperAdmin ? managedUsers : managedUsers.filter((user) => user.role === "member");
@@ -718,7 +735,8 @@ function App() {
   const borrowSummary = (itemId: string) => borrowSummaryByItem.get(itemId) ?? null;
 
   const toggleItemSelection = (itemId: string) => {
-    if (borrowSummaryByItem.has(itemId)) return;
+    const item = items.find((candidate) => candidate.id === itemId);
+    if (!item || borrowSummaryByItem.has(itemId) || !isPhysicalLocation(item.locationCode)) return;
     setSelectedItemIds((current) => {
       const next = new Set(current);
       if (next.has(itemId)) next.delete(itemId);
@@ -728,7 +746,7 @@ function App() {
   };
 
   const toggleVisibleSelection = () => {
-    const availableVisibleIds = visibleItems.filter((item) => !borrowSummaryByItem.has(item.id)).map((item) => item.id);
+    const availableVisibleIds = availableVisibleItems.map((item) => item.id);
     setSelectedItemIds((current) => {
       const next = new Set(current);
       const shouldSelect = availableVisibleIds.some((id) => !next.has(id));
@@ -756,7 +774,7 @@ function App() {
   );
 
   const originalLocationForLine = (line: DbBorrowItemRow) =>
-    line.borrow_location_code ?? items.find((item) => item.id === line.item_id)?.locationCode ?? "A1";
+    line.borrow_location_code ?? "";
 
   const selectLocation = (value: Selection) => {
     setSelection(value);
@@ -839,20 +857,15 @@ function App() {
         imagePath = urlData.publicUrl;
       }
 
-      if (isSuperAdmin) {
-        const result = editor.mode === "create"
-          ? await client.rpc("create_inventory_item", {
-              p_name: name, p_location_code: locationCode, p_quantity: quantity, p_specification: specification,
-              p_image_name: imageName, p_image_path: imagePath, p_recognition_status: recognitionStatus,
-            })
-          : await client.rpc("update_inventory_item", {
+      if (isSuperAdmin && editor.mode === "edit") {
+        const result = await client.rpc("update_inventory_item", {
               p_item_id: editor.item!.id, p_name: name, p_location_code: locationCode, p_quantity: quantity,
               p_specification: specification, p_image_name: imageName, p_image_path: imagePath,
               p_recognition_status: recognitionStatus,
             });
         if (result.error) throw result.error;
         succeeded = true;
-        setNotice(editor.mode === "create" ? "物品已创建并写入正式库存。" : "正式库存已更新。");
+        setNotice("正式库存已更新。");
       } else {
         const { error: requestError } = await client.from("inventory_change_requests").insert({
           request_type: editor.mode === "create" ? "create" : "update",
@@ -923,17 +936,17 @@ function App() {
   };
 
   const reviewRequest = async (requestId: number, approve: boolean) => {
-    if (!client || !isSuperAdmin) return;
+    if (!client || (!isSuperAdmin && !isAdmin)) return;
     setSubmitting(true);
     setError(null);
     setNotice(null);
-    const { error: reviewError } = await client.rpc("review_inventory_change_request", {
+    const { data: affectedItem, error: reviewError } = await client.rpc("review_inventory_change_request", {
       p_request_id: requestId,
       p_approve: approve,
       p_review_note: approve ? "批准" : "拒绝",
     });
     if (reviewError) setError(reviewError.message);
-    else setNotice(approve ? "请求已批准，正式库存已同步。" : "请求已拒绝，正式库存未改变。");
+    else setNotice(approve ? affectedItem ? "所有审批已通过，正式库存已同步。" : "本级审批已通过，等待另一位管理员确认。" : "请求已拒绝，正式库存未改变。");
     setSubmitting(false);
     if (!reviewError) await loadData();
   };
@@ -1038,22 +1051,32 @@ function App() {
     setReturnPhotoFiles({});
     setReturnLocationChecks({});
     setScannedLocations({});
+    setScanLineId(null);
     setReturnEditorOrderId(orderId);
   };
 
+  const closeReturnEditor = () => {
+    setScanLineId(null);
+    setReturnEditorOrderId(null);
+  };
+
   const confirmShelfScan = (line: DbBorrowItemRow, payload: string) => {
-    const scannedCode = payload.trim().replace(/^513-warehouse:/i, "").toUpperCase();
-    const expectedCode = originalLocationForLine(line).toUpperCase();
+    const scannedCode = parseLocationQr(payload);
+    const expectedCode = originalLocationForLine(line);
+    if (!scannedCode) {
+      setScanError("请扫描仓库张贴的 A1–D4、地板或门后位置二维码。");
+      return false;
+    }
     if (scannedCode !== expectedCode) {
       setScanError(`二维码对应 ${locationLabel(scannedCode)}，但这件物品借出前位于 ${locationLabel(expectedCode)}。`);
-      return;
+      return false;
     }
     setScannedLocations((current) => ({ ...current, [line.id]: scannedCode }));
     setReturnLocationChecks((current) => ({ ...current, [line.id]: true }));
-    setScanPayload("");
     setScanError(null);
     setScanLineId(null);
     setNotice(`${locationLabel(expectedCode)} 二维码验证通过。`);
+    return true;
   };
 
   const handleReturnSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1074,6 +1097,7 @@ function App() {
       const requestItems: Array<{
         borrow_item_id: number;
         returned_location_code: string;
+        scanned_qr_payload: string;
         photo_path: string | null;
         item_condition: "good" | "damaged" | "lost";
         notes: string | null;
@@ -1103,6 +1127,7 @@ function App() {
         requestItems.push({
           borrow_item_id: line.id,
           returned_location_code: scannedLocations[line.id] ?? originalLocationForLine(line),
+          scanned_qr_payload: `513-warehouse:${scannedLocations[line.id]}`,
           photo_path: path,
           item_condition: String(form.get(`condition_${line.id}`) ?? "good") as "good" | "damaged" | "lost",
           notes: String(form.get(`returnNote_${line.id}`) ?? "").trim() || null,
@@ -1161,6 +1186,69 @@ function App() {
       return;
     }
     setBorrowEditorOpen(true);
+  };
+
+  const assignDelegate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!client || delegateOrderId === null) return;
+    const form = new FormData(event.currentTarget);
+    setSubmitting(true);
+    setError(null);
+    const { error: delegateError } = await client.rpc("assign_borrow_return_delegate", {
+      p_order_id: delegateOrderId,
+      p_delegate_student_id: String(form.get("delegateStudentId") ?? "").trim() || null,
+    });
+    setSubmitting(false);
+    if (delegateError) { setError(delegateError.message); return; }
+    setDelegateOrderId(null);
+    setNotice("代还委托已更新。原借用人仍负责物品，代还人可登录扫码提交归还。");
+    await loadData();
+  };
+
+  const canReviewInventory = (request: InventoryChangeRequest) => request.status === "pending"
+    && request.requestedBy !== profile?.id
+    && ((isSuperAdmin && request.superReviewStatus === "pending")
+      || (isAdmin && request.requestedRole === "member"
+        && request.requestedDepartmentId === profile?.departmentId
+        && request.departmentReviewStatus === "pending"));
+
+  const correctBorrowLocation = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!client || locationCorrectionLineId === null) return;
+    const form = new FormData(event.currentTarget);
+    setSubmitting(true);
+    setError(null);
+    const { error: correctionError } = await client.rpc("correct_unresolved_borrow_location", {
+      p_borrow_item_id: locationCorrectionLineId,
+      p_location_code: String(form.get("confirmedLocation")),
+      p_reason: String(form.get("correctionReason")).trim(),
+    });
+    setSubmitting(false);
+    if (correctionError) { setError(correctionError.message); return; }
+    setLocationCorrectionLineId(null);
+    setNotice("已确认历史借用的归还层位，借用人可扫描该位置二维码归还。");
+    await loadData();
+  };
+
+  const borrowActions = (order: BorrowOrder) => {
+    const own = order.userId === profile?.id;
+    const delegated = order.returnDelegateId === profile?.id;
+    const returnRequest = borrowReturnRequestByOrder.get(order.id);
+    const canReview = !own && (isSuperAdmin || (isAdmin && order.borrowerRole === "member"));
+    if ((own || delegated) && order.status === "borrowed") return <div className="borrow-action-stack">
+      <button className="secondary-button compact-button" onClick={() => openReturnEditor(order.id)} disabled={!returnFeatureReady || submitting}><RotateCcw size={14} />{delegated ? "代为归还" : "填写归还申请"}</button>
+      {own && <button className="secondary-button compact-button" onClick={() => setDelegateOrderId(order.id)}><UsersRound size={14} />{order.returnDelegateId ? "管理代还" : "委托代还"}</button>}
+    </div>;
+    if (order.status === "return_requested") return canReview && returnRequest && returnRequest.submitted_by !== profile?.id
+      ? <button className="secondary-button compact-button" onClick={() => { setReturnReviewRequestId(returnRequest.id); setReturnReviewNote(""); }} disabled={submitting}><Camera size={14} />核验归还</button>
+      : <span className="muted-text">归还审核中</span>;
+    if (canReview && nextBorrowStatuses(order.status).length) return <div className="borrow-action-stack">
+      {borrowItems.some((line) => line.order_id === order.id && !isPhysicalLocation(items.find((item) => item.id === line.item_id)?.locationCode ?? ""))
+        ? <span className="muted-text">请先确认物品层位</span>
+        : <button className="secondary-button compact-button" onClick={() => void updateBorrowStatus(order.id, "borrowed")} disabled={submitting}><Check size={14} />批准并借出</button>}
+      <button className="icon-button reject" onClick={() => void updateBorrowStatus(order.id, "cancelled")} disabled={submitting} title="拒绝借用" aria-label="拒绝借用"><Ban size={16} /></button>
+    </div>;
+    return <span className="muted-text">{["returned", "cancelled"].includes(order.status) ? "已完成" : "等待管理员"}</span>;
   };
 
   const handleExport = async () => {
@@ -1378,7 +1466,7 @@ function App() {
         <div className="topbar-summary"><span><Box size={16} /> {items.length} 件物品</span>{profile?.role === "member" ? <><span><PackageCheck size={16} /> {memberBorrowActionCount} 个借用流程</span><span><RotateCcw size={16} /> {outstandingBorrowItemCount} 件未归还</span></> : <><span><ClipboardList size={16} /> {pendingRequestCount} 个待审批</span><span><PackageCheck size={16} /> {pendingBorrowCount} 个借用待处理</span></>}</div>
         <span className="account-email" title={session?.user.email}>{profile?.name} · {profile?.role}</span>
         <button className="icon-button sign-out-button" onClick={() => client?.auth.signOut()} aria-label="退出登录" title="退出登录"><LogOut size={18} /></button>
-        {profile?.role === "member" ? <button className="primary-button" onClick={() => setView("borrows")}><PackageCheck size={18} /><span>借用状态</span></button> : <button className="primary-button" aria-label={isSuperAdmin ? "新增物品" : "申请新增物品"} onClick={() => { setView("inventory"); setEditor({ mode: "create" }); }}><PackagePlus size={18} /><span>{isSuperAdmin ? "新增物品" : "申请新增"}</span></button>}
+        <button className="primary-button" onClick={() => { setView("inventory"); if (selectedItems.length) openBorrowEditor(); else setEditor({ mode: "create" }); }}>{selectedItems.length ? <ListChecks size={18} /> : <PackagePlus size={18} />}<span>{selectedItems.length ? "填写借用单" : "申请新增"}</span></button>
       </header>
 
       <aside id="warehouse-navigation" className={`sidebar ${mobileNavOpen ? "open" : ""}`}>
@@ -1396,13 +1484,14 @@ function App() {
           <button className={`nav-row ${selection === "DOOR" && view === "inventory" ? "active" : ""}`} onClick={() => selectLocation("DOOR")}><DoorOpen size={17} /><span>门后区域</span><b>{navCount("DOOR")}</b></button>
           <button className={`nav-row pending-nav ${selection === "PENDING" && view === "inventory" ? "active" : ""}`} onClick={() => selectLocation("PENDING")}><CircleAlert size={17} /><span>待分层</span><b>{pendingLocationCount}</b></button>
           <div className="nav-divider" />
-          {profile?.role !== "member" && <button className={`nav-row ${view === "requests" ? "active" : ""}`} onClick={() => { setView("requests"); setMobileNavOpen(false); }}><ClipboardList size={17} /><span>{isSuperAdmin ? "变更审批" : "物品申请"}</span><b>{pendingRequestCount}</b></button>}
+          <button className={`nav-row ${view === "requests" ? "active" : ""}`} onClick={() => { setView("requests"); setMobileNavOpen(false); }}><ClipboardList size={17} /><span>{isSuperAdmin || isAdmin ? "物品审批" : "我的申请"}</span><b>{pendingRequestCount}</b></button>
           <button className={`nav-row ${view === "borrows" ? "active" : ""}`} onClick={() => { setView("borrows"); setMobileNavOpen(false); }}><PackageCheck size={17} /><span>{profile?.role === "member" ? "借用状态" : "借用监管"}</span><b>{profile?.role === "member" ? memberBorrowActionCount : pendingBorrowCount}</b></button>
           {(isSuperAdmin || isAdmin) && <button className={`nav-row ${view === "activities" ? "active" : ""}`} onClick={() => { setView("activities"); setMobileNavOpen(false); }}><CalendarRange size={17} /><span>活动管理</span><b>{activeActivities.length}</b></button>}
           {isSuperAdmin && <button className={`nav-row ${view === "announcements" ? "active" : ""}`} onClick={() => { setView("announcements"); setMobileNavOpen(false); }}><BellRing size={17} /><span>公告管理</span><b>{announcements.filter((announcement) => announcement.is_active).length}</b></button>}
           {canManageUsers && <button className={`nav-row ${view === "users" ? "active" : ""}`} onClick={() => { setView("users"); setMobileNavOpen(false); }}><UsersRound size={17} /><span>人员管理</span><b>{visibleManagedUsers.length}</b></button>}
           {isSuperAdmin && <button className={`nav-row ${view === "departments" ? "active" : ""}`} onClick={() => { setView("departments"); setMobileNavOpen(false); }}><Building2 size={17} /><span>部门管理</span><b>{departments.length}</b></button>}
         </nav>
+        <DeveloperContact onOpen={() => setMobileNavOpen(false)} />
       </aside>
 
       {mobileNavOpen && <button className="nav-backdrop" aria-label="点击关闭位置导航" onClick={() => setMobileNavOpen(false)} />}
@@ -1415,10 +1504,10 @@ function App() {
           <>
             <div className="content-heading">
               <div><p className="eyebrow">正式库存</p><h1>{selectionTitle(selection)}</h1><p>{visibleItems.length} 件匹配物品</p></div>
-              {profile?.role === "member" ? <button className="primary-button heading-add" onClick={openBorrowEditor}><ListChecks size={18} />填写借用单</button> : <button className="primary-button heading-add" onClick={() => setEditor({ mode: "create" })}><PackagePlus size={18} />{isSuperAdmin ? "新增" : "申请新增"}</button>}
+              <button className="primary-button heading-add" onClick={() => selectedItems.length ? openBorrowEditor() : setEditor({ mode: "create" })}>{selectedItems.length ? <ListChecks size={18} /> : <PackagePlus size={18} />}{selectedItems.length ? "填写借用单" : "申请新增"}</button>
             </div>
 
-            {profile?.role === "member" && outstandingBorrowOrders.length > 0 && <section className="outstanding-borrow-panel" aria-label="未归还提醒">
+            {outstandingBorrowOrders.length > 0 && <section className="outstanding-borrow-panel" aria-label="未归还提醒">
               <div className="outstanding-borrow-icon"><RotateCcw size={20} /></div>
               <div className="outstanding-borrow-copy"><strong>您有 {outstandingBorrowItemCount || outstandingBorrowOrders.length} 件物品尚未归还</strong><span>{outstandingBorrowOrders.some((order) => order.status === "return_requested") ? "部分归还申请正在等待管理员核验。" : "请进入借用状态，逐件填写归还申请并扫描对应货架二维码；归还照片可选。"}</span></div>
               <button className="secondary-button compact-button" onClick={() => setView("borrows")}><PackageCheck size={15} />查看借用状态</button>
@@ -1435,7 +1524,7 @@ function App() {
               <div className="toolbar">
                 <label className="search-box"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、编号、规格、图片或位置" />{query && <button onClick={() => setQuery("")} aria-label="清除搜索"><X size={16} /></button>}</label>
                 <button className="icon-button" onClick={() => void loadData()} aria-label="刷新数据" title="刷新"><RefreshCw size={17} /></button>
-                <label className="selection-toggle"><input type="checkbox" checked={visibleItems.some((item) => !borrowSummaryByItem.has(item.id)) && selectedVisibleCount === visibleItems.filter((item) => !borrowSummaryByItem.has(item.id)).length} onChange={toggleVisibleSelection} /><span>全选当前可借物品</span></label>
+                <label className="selection-toggle"><input type="checkbox" checked={availableVisibleItems.length > 0 && selectedVisibleCount === availableVisibleItems.length} onChange={toggleVisibleSelection} /><span>全选当前可借物品</span></label>
                 <span className="selection-count">已选 {selectedItems.length} 件</span>
                 <button className="secondary-button compact-button export-button" onClick={() => void handleExport()} disabled={selectedItems.length === 0 || submitting}><FileSpreadsheet size={15} />导出 XLSX</button>
                 <span className="result-count">显示 {visibleItems.length} / {items.length}</span>
@@ -1445,12 +1534,12 @@ function App() {
                   <thead><tr><th className="selection-column"><span className="sr-only">选择</span></th><th>物品</th><th>唯一编号</th><th>当前位置</th><th>规格 / 数量</th><th>状态</th><th><span className="sr-only">操作</span></th></tr></thead>
                   <tbody>{visibleItems.map((item) => { const meta = statusMeta(item); return (
                     <tr key={item.id} onClick={() => setDetailId(item.id)}>
-                      <td className="selection-cell" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedItemIds.has(item.id)} disabled={borrowSummaryByItem.has(item.id)} onChange={() => toggleItemSelection(item.id)} aria-label={`选择 ${item.name}`} /></td>
-                      <td><div className="item-cell">{item.imagePath ? <img src={assetUrl(item.imagePath)} alt="" /> : <div className="image-placeholder"><Box size={20} /></div>}<div><strong>{item.name}</strong><small>{item.imageName || item.recognitionStatus}</small></div></div></td>
+                      <td className="selection-cell" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedItemIds.has(item.id)} disabled={borrowSummaryByItem.has(item.id) || !isPhysicalLocation(item.locationCode)} onChange={() => toggleItemSelection(item.id)} aria-label={`选择 ${item.name}`} title={!isPhysicalLocation(item.locationCode) ? "确认具体层位后可借用" : undefined} /></td>
+                      <td><div className="item-cell">{item.imagePath ? <img src={item.imagePath} alt="" /> : <div className="image-placeholder"><Box size={20} /></div>}<div><strong>{item.name}</strong><small>{item.imageName || item.recognitionStatus}</small></div></div></td>
                       <td><code>{item.id}</code></td>
                       <td><span className={`location-pill ${isPendingLocation(item.locationCode) ? "pending" : ""}`}><MapPin size={14} />{locationLabel(item.locationCode)}</span></td>
                       <td><div className="spec-cell"><span>{item.specification || "未填写规格"}</span><strong>{item.quantity}</strong></div></td>
-                      <td><div className="status-stack"><span className={`status-badge ${meta.className}`}>{meta.text}</span>{borrowSummaryByItem.has(item.id) && <span className="status-badge borrowed">已借出</span>}</div></td>
+                      <td><div className="status-stack"><span className={`status-badge ${meta.className}`}>{meta.text}</span>{borrowSummaryByItem.has(item.id) && <span className="status-badge borrowed">已借出</span>}{!isPhysicalLocation(item.locationCode) && <span className="status-badge pending">待确认层位 · 暂不可借</span>}</div></td>
                       <td className="action-cell">{profile?.role !== "member" && <button className="icon-button" onClick={(event) => { event.stopPropagation(); setEditor({ mode: "edit", item }); }} aria-label={`${isSuperAdmin ? "编辑" : "申请修改"} ${item.name}`} title={isSuperAdmin ? "编辑" : "申请修改"}><Edit3 size={17} /></button>}<button className="icon-button more" onClick={(event) => { event.stopPropagation(); setDetailId(item.id); }} aria-label={`查看 ${item.name}`} title="查看详情"><MoreHorizontal size={18} /></button></td>
                     </tr>
                   ); })}</tbody>
@@ -1465,15 +1554,16 @@ function App() {
             <div className="content-heading"><div><p className="eyebrow">数据请求</p><h1>{isSuperAdmin ? "变更审批" : "我的申请"}</h1><p>{pendingRequestCount} 个待处理请求</p></div><button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button></div>
             <section className="inventory-panel request-panel">
               <div className="table-wrap"><table>
-                <thead><tr><th>请求</th><th>目标</th><th>建议数据</th><th>提交时间</th><th>状态</th>{isSuperAdmin && <th>审批</th>}</tr></thead>
+                <thead><tr><th>请求</th><th>目标</th><th>申请人 / 部门</th><th>建议数据</th><th>提交时间</th><th>状态</th>{(isSuperAdmin || isAdmin) && <th>审批</th>}</tr></thead>
                 <tbody>{requests.map((request) => { const type = requestMeta[request.requestType]; const state = requestStatusMeta[request.status]; return (
                   <tr key={request.id}>
                     <td><span className={`status-badge ${type.className}`}>{type.label}</span></td>
                     <td><code>{request.itemId ?? request.resultItemId ?? "待分配编号"}</code></td>
+                    <td><div className="user-cell"><strong>{userName(request.requestedBy)}</strong><small>{departmentName(request.requestedDepartmentId)}</small></div></td>
                     <td><div className="request-summary"><strong>{request.proposedName ?? items.find((item) => item.id === request.itemId)?.name ?? "-"}</strong><span>{request.proposedSpecification || "无规格变更"} · {request.proposedQuantity || "无数量变更"}</span>{request.reason && <small>{request.reason}</small>}</div></td>
                     <td>{new Date(request.createdAt).toLocaleString("zh-CN")}</td>
-                    <td><span className={`status-badge ${state.className}`}>{state.label}</span></td>
-                    {isSuperAdmin && <td className="review-actions">{request.status === "pending" ? <><button className="icon-button approve" onClick={() => void reviewRequest(request.id, true)} disabled={submitting} aria-label="批准" title="批准"><Check size={17} /></button><button className="icon-button reject" onClick={() => void reviewRequest(request.id, false)} disabled={submitting} aria-label="拒绝" title="拒绝"><Ban size={17} /></button></> : <span>-</span>}</td>}
+                    <td><span className={`status-badge ${state.className}`}>{state.label}</span><small className="borrowed-time">部门：{request.departmentReviewStatus === "not_required" ? "免审" : requestStatusMeta[request.departmentReviewStatus]?.label}</small><small className="borrowed-time">系统：{requestStatusMeta[request.superReviewStatus]?.label}</small></td>
+                    {(isSuperAdmin || isAdmin) && <td className="review-actions">{canReviewInventory(request) ? <><button className="icon-button approve" onClick={() => void reviewRequest(request.id, true)} disabled={submitting} aria-label="批准本级审批" title="批准本级审批"><Check size={17} /></button><button className="icon-button reject" onClick={() => void reviewRequest(request.id, false)} disabled={submitting} aria-label="拒绝" title="拒绝"><Ban size={17} /></button></> : <span>-</span>}</td>}
                   </tr>
                 ); })}</tbody>
               </table>{!loading && requests.length === 0 && <div className="empty-state"><ClipboardList size={26} /><strong>暂无变更请求</strong><span>库存正式数据与请求数据保持隔离</span></div>}</div>
@@ -1481,7 +1571,7 @@ function App() {
           </>
         ) : view === "users" ? (
           <>
-            <div className="content-heading"><div><p className="eyebrow">账户与权限</p><h1>人员管理</h1><p>{isSuperAdmin ? "超级管理员可调整角色、部门与启用状态。" : `仅显示${departmentName(profile?.departmentId ?? null)}的普通用户，可维护人员资料。`}</p></div><button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button></div>
+            <div className="content-heading"><div><p className="eyebrow">账户与权限</p><h1>人员管理</h1><p>{isSuperAdmin ? "超级管理员可调整角色、部门与启用状态。" : `仅显示${departmentName(profile?.departmentId ?? null)}的普通用户，可维护人员资料。`}</p></div><div className="heading-actions">{isSuperAdmin && <AccountImport onImported={loadData} />}<button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button></div></div>
             <section className="inventory-panel user-panel">
               <div className="table-wrap"><table><thead><tr><th>人员</th><th>角色</th><th>部门 / 职位</th><th>联系方式</th><th>状态</th><th>操作</th></tr></thead>
               <tbody>{visibleManagedUsers.map((user) => (
@@ -1498,9 +1588,24 @@ function App() {
           </>
         ) : view === "borrows" ? (
           <>
-            <div className="content-heading"><div><p className="eyebrow">借用状态监管</p><h1>{profile?.role === "member" ? "借用状态和归还申请" : "借用订单"}</h1><p>{isSuperAdmin ? "查看并处理全部部门订单与归还申请。" : isAdmin ? `查看${departmentName(profile?.departmentId ?? null)}本部门订单与归还申请。` : "查看自己的借用状态；借出中的物品必须填写归还申请并扫描对应货架二维码，归还照片可选。"}</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button>{profile?.role === "member" && <button className="primary-button" onClick={() => { setView("inventory"); setNotice("请在库存列表勾选物品后填写借用单。"); }}><CalendarClock size={17} />选择物品</button>}</div></div>
+            <div className="content-heading"><div><p className="eyebrow">借用状态监管</p><h1>{profile?.role === "member" ? "借用状态和归还申请" : "借用订单"}</h1><p>{isSuperAdmin ? "查看并处理全部部门订单与归还申请。" : isAdmin ? `查看${departmentName(profile?.departmentId ?? null)}本部门订单与归还申请。` : "查看自己的借用状态；借出中的物品必须填写归还申请并扫描对应货架二维码，归还照片可选。"}</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button>{<button className="primary-button" onClick={() => { setView("inventory"); setNotice("请在库存列表勾选物品后填写借用单。"); }}><CalendarClock size={17} />选择物品</button>}</div></div>
             <section className="borrow-filters" aria-label="订单状态筛选">{(["all", "pending", "approved", "borrowed", "return_requested", "returned", "cancelled"] as const).map((status) => <button key={status} className={borrowStatusFilter === status ? "active" : ""} onClick={() => setBorrowStatusFilter(status)}>{status === "all" ? "全部" : borrowStatusMeta[status].label}</button>)}</section>
-            <section className="inventory-panel borrow-panel"><div className="table-wrap"><table><thead><tr><th>订单</th><th>借用人 / 部门</th><th>活动</th><th>物品明细</th><th>借用提交 / 预计归还</th><th>状态</th><th>处理</th></tr></thead><tbody>{visibleBorrowOrders.map((order) => { const status = borrowStatusMeta[order.status]; const returnRequest = borrowReturnRequestByOrder.get(order.id); const isMemberOrder = profile?.role === "member"; return <tr key={order.id}><td><div className="user-cell"><strong>{order.orderNumber}</strong><small>借用提交：{formatDateTime(order.createdAt)}</small>{order.returnSubmittedAt && <small>归还提交：{formatDateTime(order.returnSubmittedAt)}</small>}</div></td><td><div className="user-cell"><strong>{userName(order.userId)}</strong><small>{departmentName(order.departmentId)}</small></div></td><td>{activityName(order.activityId)}</td><td><div className="request-summary"><strong>{orderItemSummary(order.id)}</strong>{order.reason && <small>{order.reason}</small>}</div></td><td><span className={isOverdue(order) ? "overdue" : ""}>{order.expectedReturnDate || "未填写"}</span>{isOverdue(order) && <small className="overdue-label">已逾期</small>}</td><td><span className={`status-badge ${status.className}`}>{status.label}</span>{order.borrowedAt && <small className="borrowed-time">实际借出：{formatDateTime(order.borrowedAt)}</small>}{order.actualReturnDate && <small className="borrowed-time">确认归还：{formatDateTime(order.actualReturnDate)}</small>}</td><td>{isMemberOrder ? (order.status === "borrowed" ? <button className="secondary-button compact-button" onClick={() => openReturnEditor(order.id)} disabled={!returnFeatureReady || submitting}><RotateCcw size={14} />填写归还申请</button> : order.status === "return_requested" ? <span className="muted-text">归还审核中</span> : <span className="muted-text">等待管理员</span>) : order.status === "return_requested" && returnRequest ? <button className="secondary-button compact-button" onClick={() => { setReturnReviewRequestId(returnRequest.id); setReturnReviewNote(""); }} disabled={submitting}><Camera size={14} />核验归还</button> : (isSuperAdmin || isAdmin) ? (nextBorrowStatuses(order.status).length > 0 ? <select className="status-select" value={order.status} onChange={(event) => void updateBorrowStatus(order.id, event.target.value as BorrowOrderStatus)} disabled={submitting}><option value={order.status}>{status.label}</option>{nextBorrowStatuses(order.status).map((value) => <option key={value} value={value}>{borrowStatusMeta[value].label}</option>)}</select> : <span className="muted-text">已完成</span>) : <span className="muted-text">等待管理员</span>}</td></tr>; })}</tbody></table>{!loading && visibleBorrowOrders.length === 0 && <div className="empty-state"><PackageCheck size={27} /><strong>暂无借用订单</strong><span>{profile?.role === "member" ? "提交借用申请后，状态会显示在这里" : "当前筛选下暂无借用订单"}</span></div>}</div></section>
+            <section className="inventory-panel borrow-panel"><div className="table-wrap"><table>
+              <thead><tr><th>订单</th><th>借用人 / 部门</th><th>活动</th><th>物品明细</th><th>预计归还</th><th>状态</th><th>处理</th></tr></thead>
+              <tbody>{visibleBorrowOrders.map((order) => {
+                const status = borrowStatusMeta[order.status];
+                const borrower = managedUsers.find((user) => user.id === order.userId);
+                return <tr key={order.id}>
+                  <td><div className="user-cell"><strong>{order.orderNumber}</strong><small>借用提交：{formatDateTime(order.createdAt)}</small>{order.returnSubmittedAt && <small>归还提交：{formatDateTime(order.returnSubmittedAt)}</small>}</div></td>
+                  <td><div className="user-cell"><strong>{userName(order.userId)}</strong><small>{departmentName(order.departmentId)}</small>{borrower?.phone && <a href={`tel:${borrower.phone}`}>{borrower.phone}</a>}{order.returnDelegateId && <small>代还：{order.returnDelegateName} · {order.returnDelegateStudentId}</small>}</div></td>
+                  <td>{activityName(order.activityId)}</td>
+                  <td><div className="request-summary"><strong>{orderItemSummary(order.id)}</strong>{order.reason && <small>{order.reason}</small>}</div></td>
+                  <td><span className={isOverdue(order) ? "overdue" : ""}>{order.expectedReturnDate || "未填写"}</span>{isOverdue(order) && <small className="overdue-label">已逾期</small>}</td>
+                  <td><span className={`status-badge ${status.className}`}>{status.label}</span>{order.borrowedAt && <small className="borrowed-time">实际借出：{formatDateTime(order.borrowedAt)}</small>}{order.actualReturnDate && <small className="borrowed-time">确认归还：{formatDateTime(order.actualReturnDate)}</small>}</td>
+                  <td>{borrowActions(order)}{isSuperAdmin && order.status === "borrowed" && borrowItems.filter((line) => line.order_id === order.id && !isPhysicalLocation(line.borrow_location_code ?? "")).map((line) => <button key={line.id} className="secondary-button compact-button" onClick={() => setLocationCorrectionLineId(line.id)}><MapPin size={14} />确认 {line.item_id} 归还层位</button>)}</td>
+                </tr>;
+              })}</tbody>
+            </table>{!loading && visibleBorrowOrders.length === 0 && <div className="empty-state"><PackageCheck size={27} /><strong>暂无借用订单</strong></div>}</div></section>
           </>
         ) : view === "announcements" ? (
           <>
@@ -1542,7 +1647,7 @@ function App() {
       {editor && (
         <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setEditor(null)}>
           <section className="modal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
-            <header><div><p className="eyebrow">{isSuperAdmin ? "正式库存" : "变更申请"}</p><h2 id="editor-title">{editor.mode === "create" ? (isSuperAdmin ? "新增物品" : "申请新增物品") : (isSuperAdmin ? "编辑物品" : "申请修改物品")}</h2></div><button className="icon-button" onClick={() => setEditor(null)} aria-label="关闭"><X size={20} /></button></header>
+            <header><div><p className="eyebrow">{isSuperAdmin ? "正式库存" : "变更申请"}</p><h2 id="editor-title">{editor.mode === "create" ? "申请新增物品" : (isSuperAdmin ? "编辑物品" : "申请修改物品")}</h2></div><button className="icon-button" onClick={() => setEditor(null)} aria-label="关闭"><X size={20} /></button></header>
             <form onSubmit={handleSubmit}>
               {editor.mode === "edit" && <label><span>唯一编号</span><input value={editor.item?.id} disabled /><small>编号由数据库永久分配，不能修改或复用</small></label>}
               {editor.mode === "create" && <div className="info-notice"><CircleAlert size={16} /><span>物品编号将由系统自动生成（如 ITEM0093），无需手动填写</span></div>}
@@ -1551,11 +1656,11 @@ function App() {
               <label><span>数量</span><input name="quantity" defaultValue={editor.item?.quantity ?? "若干"} maxLength={30} /></label>
               <label><span>存放位置</span><LocationSelect defaultValue={editor.item?.locationCode ?? defaultCreateLocation(selection)} /></label>
               <label><span>物品图片</span><input ref={imageInputRef} type="file" name="imageFile" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={handleImageSelection} /><small>支持拍照或从相册选择，格式为 JPEG、PNG、WebP、HEIC 或 HEIF，最大 10 MB</small></label>
-              {(imagePreviewUrl || (editor.mode === "edit" && editor.item?.imagePath)) && <div className="image-upload-preview"><img src={imagePreviewUrl ?? (editor.item?.imagePath ? assetUrl(editor.item.imagePath) : undefined)} alt="待上传的物品预览" /><div><strong>{selectedImage ? "新图片已选择" : "当前图片"}</strong>{selectedImage && <small>{selectedImage.name} · {(selectedImage.size / 1024 / 1024).toFixed(1)} MB</small>}{selectedImage && <button type="button" className="secondary-button compact-button" onClick={clearSelectedImage}><X size={14} />移除</button>}</div></div>}
+              {(imagePreviewUrl || (editor.mode === "edit" && editor.item?.imagePath)) && <div className="image-upload-preview"><img src={imagePreviewUrl ?? editor.item?.imagePath} alt="待上传的物品预览" /><div><strong>{selectedImage ? "新图片已选择" : "当前图片"}</strong>{selectedImage && <small>{selectedImage.name} · {(selectedImage.size / 1024 / 1024).toFixed(1)} MB</small>}{selectedImage && <button type="button" className="secondary-button compact-button" onClick={clearSelectedImage}><X size={14} />移除</button>}</div></div>}
               {editor.mode === "edit" && <><label><span>图片文件名</span><input name="imageName" defaultValue={editor.item?.imageName ?? ""} maxLength={180} /></label><label><span>图片路径</span><input name="imagePath" defaultValue={editor.item?.imagePath ?? ""} maxLength={300} /></label></>}
               <label><span>识别状态</span><input name="recognitionStatus" defaultValue={editor.item?.recognitionStatus ?? "已确认"} maxLength={80} /></label>
-              {!isSuperAdmin && <label><span>申请说明</span><textarea name="reason" rows={3} maxLength={300} placeholder="说明新增或修改原因" required /></label>}
-              <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setEditor(null)}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "提交中..." : isSuperAdmin ? "写入正式库存" : <><Send size={16} />提交审批</>}</button></div>
+              {(!isSuperAdmin || editor.mode === "create") && <label><span>申请说明</span><textarea name="reason" rows={3} maxLength={300} placeholder="说明新增或修改原因" required /></label>}
+              <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setEditor(null)}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "提交中..." : isSuperAdmin && editor.mode === "edit" ? "写入正式库存" : <><Send size={16} />提交审批</>}</button></div>
             </form>
           </section>
         </div>
@@ -1647,15 +1752,31 @@ function App() {
         </div>
       )}
 
+      {locationCorrectionLineId !== null && <div className="modal-layer">
+        <section className="modal" role="dialog" aria-modal="true" aria-labelledby="location-correction-title">
+          <header><div><p className="eyebrow">历史借用</p><h2 id="location-correction-title">确认归还层位</h2></div><button className="icon-button" onClick={() => setLocationCorrectionLineId(null)} aria-label="关闭"><X size={20} /></button></header>
+          <form onSubmit={correctBorrowLocation}>
+            <label><span>确认位置</span><select name="confirmedLocation" defaultValue="" required><option value="" disabled>请选择实际确认的位置</option>{locations.filter((item) => isPhysicalLocation(item.code)).map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
+            <label><span>确认依据</span><textarea name="correctionReason" rows={3} required maxLength={500} placeholder="请实际核对物品原位后填写依据" /></label>
+            <div className="form-actions"><button className="secondary-button" type="button" onClick={() => setLocationCorrectionLineId(null)}>取消</button><button className="primary-button" type="submit" disabled={submitting}><Check size={16} />确认并记录</button></div>
+          </form>
+        </section>
+      </div>}
+
+      {delegateOrderId !== null && <div className="modal-layer"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="delegate-title">
+        <header><h2 id="delegate-title">委托同学代还</h2><button className="icon-button" onClick={() => setDelegateOrderId(null)} aria-label="关闭"><X size={20} /></button></header>
+        <form onSubmit={assignDelegate}><label><span>代还人学号</span><input name="delegateStudentId" defaultValue={borrowOrders.find((order) => order.id === delegateOrderId)?.returnDelegateStudentId ?? ""} maxLength={80} autoComplete="off" /><small>代还人须已有启用账号；留空可取消委托。</small></label><div className="form-actions"><button type="button" className="secondary-button" onClick={() => setDelegateOrderId(null)}>取消</button><button type="submit" className="primary-button" disabled={submitting}><Check size={16} />保存委托</button></div></form>
+      </section></div>}
+
       {returnEditorOrder && (
-        <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setReturnEditorOrderId(null)}>
+        <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && closeReturnEditor()}>
           <section className="modal borrow-modal return-modal" role="dialog" aria-modal="true" aria-labelledby="return-editor-title">
-            <header><div><p className="eyebrow">物品归还</p><h2 id="return-editor-title">填写归还申请</h2><small className="modal-subtitle">订单 {returnEditorOrder.orderNumber} · 系统会记录本次提交的准确时间</small></div><button className="icon-button" onClick={() => setReturnEditorOrderId(null)} aria-label="关闭"><X size={20} /></button></header>
+            <header><div><p className="eyebrow">物品归还</p><h2 id="return-editor-title">填写归还申请</h2><small className="modal-subtitle">订单 {returnEditorOrder.orderNumber} · 系统会记录本次提交的准确时间</small></div><button className="icon-button" onClick={closeReturnEditor} aria-label="关闭"><X size={20} /></button></header>
             <form onSubmit={handleReturnSubmit}>
               <div className="info-notice"><RotateCcw size={16} /><span>请将每件物品放回借出前的原位，并扫描该货架专属二维码。系统会校验二维码位置与借出快照一致；归还照片可选，管理员核验通过后才会变为“已归还”。</span></div>
-              <div className="return-selection-list">{returnItemsForOrder.map((line) => { const item = items.find((candidate) => candidate.id === line.item_id); const originalLocation = originalLocationForLine(line); return <article className="return-item-card" key={line.id}><div className="return-item-heading"><div><strong>{item?.name ?? line.item_id}</strong><small>{line.item_id} · 数量 {line.quantity_borrowed - line.quantity_returned}</small></div><span className="location-pill"><MapPin size={14} />原位：{locationLabel(originalLocation)}</span></div><div className="return-scan-row">{scannedLocations[line.id] ? <span className="scan-success"><Check size={15} />已验证 {locationLabel(scannedLocations[line.id])}</span> : <span className="scan-pending">尚未验证货架二维码</span>}<button type="button" className="secondary-button compact-button" onClick={() => { setScanLineId(line.id); setScanPayload(""); setScanError(null); }}><Camera size={15} />扫描货架二维码</button></div><label><span>归还照片（可选）</span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={(event) => handleReturnPhotoSelection(line.id, event)} /><small>可拍摄物品放回原位后的现场照片，最大 10 MB</small></label><label><span>物品状态</span><select name={`condition_${line.id}`} defaultValue="good"><option value="good">完好</option><option value="damaged">有损坏</option><option value="lost">遗失</option></select></label><label><span>归还备注</span><textarea name={`returnNote_${line.id}`} rows={2} maxLength={200} placeholder="可选，例如损坏位置、缺少配件" /></label></article>; })}</div>
+              <div className="return-selection-list">{returnItemsForOrder.map((line) => { const item = items.find((candidate) => candidate.id === line.item_id); const originalLocation = originalLocationForLine(line); return <article className="return-item-card" key={line.id}><div className="return-item-heading"><div><strong>{item?.name ?? line.item_id}</strong><small>{line.item_id} · 数量 {line.quantity_borrowed - line.quantity_returned}</small></div><span className="location-pill"><MapPin size={14} />原位：{locationLabel(originalLocation)}</span></div><div className="return-scan-row">{scannedLocations[line.id] ? <span className="scan-success"><Check size={15} />已验证 {locationLabel(scannedLocations[line.id])}</span> : <span className="scan-pending">尚未验证货架二维码</span>}<button type="button" className="secondary-button compact-button" onClick={() => { setScanLineId(line.id); setScanError(null); }}><Camera size={15} />扫描货架二维码</button></div><label><span>归还照片（可选）</span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={(event) => handleReturnPhotoSelection(line.id, event)} /><small>可拍摄物品放回原位后的现场照片，最大 10 MB</small></label><label><span>物品状态</span><select name={`condition_${line.id}`} defaultValue="good"><option value="good">完好</option><option value="damaged">有损坏</option><option value="lost">遗失</option></select></label><label><span>归还备注</span><textarea name={`returnNote_${line.id}`} rows={2} maxLength={200} placeholder="可选，例如损坏位置、缺少配件" /></label></article>; })}</div>
               <label><span>归还说明</span><textarea name="returnNotes" rows={3} maxLength={300} placeholder="填写本次归还的补充说明" /></label>
-              <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setReturnEditorOrderId(null)}>取消</button><button type="submit" className="primary-button" disabled={submitting}><Send size={16} />{submitting ? "提交中..." : "提交归还申请"}</button></div>
+              <div className="form-actions"><button type="button" className="secondary-button" onClick={closeReturnEditor}>取消</button><button type="submit" className="primary-button" disabled={submitting}><Send size={16} />{submitting ? "提交中..." : "提交归还申请"}</button></div>
             </form>
           </section>
         </div>
@@ -1672,14 +1793,13 @@ function App() {
         </div>
       )}
 
-      {scanLineId !== null && (
+      {activeScanLine && (
         <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setScanLineId(null)}>
           <section className="modal qr-scan-modal" role="dialog" aria-modal="true" aria-labelledby="qr-scan-title">
-            <header><div><p className="eyebrow">货架验证</p><h2 id="qr-scan-title">扫描专属二维码</h2><small className="modal-subtitle">目标位置：{locationLabel(originalLocationForLine(returnItemsForOrder.find((line) => line.id === scanLineId)!))}</small></div><button className="icon-button" onClick={() => setScanLineId(null)} aria-label="关闭"><X size={20} /></button></header>
+            <header><div><p className="eyebrow">货架验证</p><h2 id="qr-scan-title">扫描专属二维码</h2><small className="modal-subtitle">目标位置：{locationLabel(originalLocationForLine(activeScanLine))}</small></div><button className="icon-button" onClick={() => setScanLineId(null)} aria-label="关闭"><X size={20} /></button></header>
             <video ref={scanVideoRef} className="qr-scan-video" muted playsInline aria-label="二维码摄像头预览" />
             {scanError && <div className="page-error" role="alert"><CircleAlert size={16} />{scanError}</div>}
-            <label><span>二维码内容（摄像头不可用时可粘贴）</span><input value={scanPayload} onChange={(event) => setScanPayload(event.target.value)} placeholder="513-warehouse:A1" /></label>
-            <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setScanLineId(null)}>取消</button><button type="button" className="primary-button" onClick={() => { const line = returnItemsForOrder.find((candidate) => candidate.id === scanLineId); if (line) confirmShelfScan(line, scanPayload); }} disabled={!scanPayload.trim()}><Check size={16} />验证二维码</button></div>
+            <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setScanLineId(null)}>取消</button></div>
           </section>
         </div>
       )}
@@ -1688,7 +1808,7 @@ function App() {
         <div className="drawer-layer" onMouseDown={(event) => event.currentTarget === event.target && setDetailId(null)}>
           <aside className="detail-drawer" aria-label="物品详情">
             <header><div><p className="eyebrow">正式库存</p><h2>{selectedDetail.name}</h2></div><button className="icon-button" onClick={() => setDetailId(null)} aria-label="关闭"><X size={20} /></button></header>
-            {selectedDetail.imagePath ? <img className="detail-image" src={assetUrl(selectedDetail.imagePath)} alt={selectedDetail.name} /> : <div className="detail-image placeholder"><Box size={38} /></div>}
+            {selectedDetail.imagePath ? <img className="detail-image" src={selectedDetail.imagePath} alt={selectedDetail.name} /> : <div className="detail-image placeholder"><Box size={38} /></div>}
             <dl className="detail-list"><div><dt>唯一编号</dt><dd><code>{selectedDetail.id}</code></dd></div><div><dt>存放位置</dt><dd>{locationLabel(selectedDetail.locationCode)}</dd></div><div><dt>规格</dt><dd>{selectedDetail.specification || "未填写"}</dd></div><div><dt>数量</dt><dd>{selectedDetail.quantity}</dd></div><div><dt>图片文件名</dt><dd>{selectedDetail.imageName || "未填写"}</dd></div><div><dt>识别状态</dt><dd>{selectedDetail.recognitionStatus}</dd></div></dl>
             {borrowSummary(selectedDetail.id) && <section className="borrow-detail"><h3><PackageCheck size={17} />当前借出信息</h3><dl><div><dt>借用人</dt><dd>{borrowSummary(selectedDetail.id)?.borrower_name}</dd></div><div><dt>所属部门</dt><dd>{borrowSummary(selectedDetail.id)?.department_name || "未分配"}</dd></div><div><dt>借出时间</dt><dd>{new Date(borrowSummary(selectedDetail.id)!.borrowed_at).toLocaleString("zh-CN")}</dd></div><div><dt>预计归还</dt><dd>{borrowSummary(selectedDetail.id)?.expected_return_date || "未填写"}</dd></div><div><dt>所属活动</dt><dd>{borrowSummary(selectedDetail.id)?.activity_name || "未关联活动"}</dd></div><div><dt>借用单号</dt><dd>{borrowSummary(selectedDetail.id)?.order_number}</dd></div></dl></section>}
             {profile?.role !== "member" && <div className="drawer-actions"><button className="primary-button" onClick={() => { setEditor({ mode: "edit", item: selectedDetail }); setDetailId(null); }}><Edit3 size={17} />{isSuperAdmin ? "编辑" : "申请修改"}</button><button className="danger-button" onClick={() => setDeleteId(selectedDetail.id)}><Trash2 size={17} />{isSuperAdmin ? "删除物品" : "申请删除"}</button></div>}

@@ -1,0 +1,10 @@
+project_id = "513base-hub"
+
+[functions.student-login]
+verify_jwt = false
+
+[functions.import-accounts]
+verify_jwt = false
+
+[functions.change-initial-password]
+verify_jwt = false

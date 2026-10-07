@@ -29,3 +29,8 @@ export const locationLabel = (code: string) =>
 
 export const normalizeLocation = (code: string) =>
   /^[A-D]\?$/.test(code) ? `PENDING_${code[0]}` : code;
+
+export function parseLocationQr(payload: string): string | null {
+  const match = /^513-warehouse:([A-D][1-4]|FLOOR|DOOR)$/.exec(payload.trim());
+  return match?.[1] ?? null;
+}

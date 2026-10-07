@@ -82,6 +82,10 @@ export interface BorrowOrder {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  borrowerRole: UserRole;
+  returnDelegateId: number | null;
+  returnDelegateName: string | null;
+  returnDelegateStudentId: string | null;
 }
 
 export type ChangeRequestType = "create" | "update" | "delete";
@@ -104,4 +108,8 @@ export interface InventoryChangeRequest {
   reviewedBy: number | null;
   reviewNote: string | null;
   createdAt: string;
+  requestedRole: UserRole;
+  requestedDepartmentId: number | null;
+  departmentReviewStatus: "pending" | "approved" | "rejected" | "not_required";
+  superReviewStatus: "pending" | "approved" | "rejected";
 }

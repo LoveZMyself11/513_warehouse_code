@@ -10,6 +10,8 @@ interface AuthContextValue {
   loading: boolean;
   configured: boolean;
   profileError: string | null;
+  mustChangePassword: boolean;
+  refreshProfile: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -20,6 +22,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [profileRevision, setProfileRevision] = useState(0);
+  const [loadedAuthId, setLoadedAuthId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -59,6 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null);
       setProfileError(null);
       setProfileLoading(false);
+      setMustChangePassword(false);
+      setLoadedAuthId(null);
       return;
     }
 
@@ -68,15 +75,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase
       .from("users")
-      .select("id, student_id, name, department_id, phone, email, position, notes, role, is_active")
+      .select("id, student_id, name, department_id, phone, email, position, notes, role, is_active, must_change_password")
       .eq("auth_user_id", session.user.id)
       .maybeSingle()
       .then(({ data, error }) => {
         if (!active) return;
         if (error || !data) {
           setProfile(null);
+          setMustChangePassword(false);
           setProfileError(error?.message ?? "账户尚未关联仓库用户资料。请联系管理员。");
         } else {
+          setMustChangePassword(Boolean(data.must_change_password));
           setProfile({
             id: data.id,
             studentId: data.student_id,
@@ -90,19 +99,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             isActive: data.is_active,
           });
         }
+        setLoadedAuthId(session.user.id);
+        setProfileLoading(false);
+      }, () => {
+        if (!active) return;
+        setProfile(null);
+        setProfileError("无法读取账户资料，请稍后重试。");
+        setLoadedAuthId(session.user.id);
         setProfileLoading(false);
       });
 
     return () => {
       active = false;
     };
-  }, [session]);
+  }, [session, profileRevision]);
 
-  const loading = authLoading || (Boolean(session) && profileLoading);
+  const loading = authLoading || (Boolean(session) && (profileLoading || loadedAuthId !== session?.user.id));
 
   const value = useMemo(
-    () => ({ client: supabase, session, profile, loading, configured: isSupabaseConfigured, profileError }),
-    [session, profile, loading, profileError],
+    () => ({ client: supabase, session, profile, loading, configured: isSupabaseConfigured, profileError, mustChangePassword, refreshProfile: () => setProfileRevision((revision) => revision + 1) }),
+    [session, profile, loading, profileError, mustChangePassword],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

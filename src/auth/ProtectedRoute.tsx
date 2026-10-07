@@ -1,9 +1,10 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { Boxes, LoaderCircle, LogOut, ShieldAlert } from "lucide-react";
 import { useAuth } from "./AuthProvider";
+import ChangeInitialPassword from "./ChangeInitialPassword";
 
 export default function ProtectedRoute() {
-  const { client, session, profile, loading, profileError } = useAuth();
+  const { client, session, profile, loading, profileError, mustChangePassword } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -17,7 +18,7 @@ export default function ProtectedRoute() {
   }
 
   if (!session) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   }
 
   if (!profile || !profile.isActive) {
@@ -38,6 +39,8 @@ export default function ProtectedRoute() {
       </main>
     );
   }
+
+  if (mustChangePassword) return <ChangeInitialPassword />;
 
   return <Outlet />;
 }

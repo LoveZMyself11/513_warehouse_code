@@ -1,13 +1,13 @@
 # 513 仓库云端部署
 
-2026-10-07 已发布当前已验证版本。本次仅处理部署和子路径适配，学号登录、Excel 导入、新增物品双重审批及所有角色借用尚未开发。
+2026-10-07 已发布云端基线；本次 `10.7beta` 发布会同步学号登录、Excel 批量导入、首次改密、新增物品双重审批、全角色借用、代还扫码和具体位置二维码校验。
 
 ## 地址与项目
 
 - 入口：https://lzmyselfai.cn/513base/
 - 登录：https://lzmyselfai.cn/513base/login
 - 管理台：https://lzmyselfai.cn/513base/app
-- Supabase：`cvurrazwebjtfffmkymn`，沿用当前数据库、Auth、RLS 和 Storage。
+- Supabase：`cvurrazwebjtfffmkymn`，沿用当前数据库、Auth、RLS 和 Storage；本轮迁移必须先通过 Supabase CLI 部署，再发布静态前端。
 - SSH：`ubuntu@101.43.62.12`，本机密钥 `~/.ssh/password_lzm123.pem`。
 - 发布源码：`/Users/love_zmyself/.codex/worktrees/513base-cloud/514base_hub`。
 
@@ -28,10 +28,11 @@ Vite 开发服务使用 `/`，生产构建和 preview 使用 `/513base/`。Route
 
 ## 后续发布
 
-在部署工作树配置本项目的 `.env.local`，仅包含浏览器允许使用的 `VITE_SUPABASE_URL` 和 publishable key，然后执行：
+在部署工作树配置本项目的 `.env.local`，仅包含浏览器允许使用的 `VITE_SUPABASE_URL` 和 publishable key。远端数据库迁移和 Edge Functions 通过 Supabase CLI 单独部署，静态站点发布执行：
 
 ```bash
 npm ci
+npx tsc --noEmit
 bash deploy/publish.sh
 ```
 
@@ -54,11 +55,12 @@ sudo /www/server/nginx/sbin/nginx -s reload
 
 ## 已完成验收
 
-- 本地与公网 Playwright 检查桌面 1366x900、手机 390x844：登录、dashboard、库存图片、登录后刷新和路由恢复正常。
+- 本地与公网 Playwright 检查桌面 1366x900、手机 390x844：学号登录、dashboard、库存图片、登录后刷新和路由恢复正常。
+- 本地浏览器回归覆盖新增双重审批、三类身份借用且审批即借出、错误/正确二维码、代还责任归属、管理员验收、Excel 模板下载、批量导入和首次改密；远端认证/RLS 回归 42 项通过。
 - 页面仅连接 `cvurrazwebjtfffmkymn.supabase.co`；无 JS 异常、无 HTTP 请求失败、无页面横向溢出。
 - `/513base` 自动跳到 `/513base/`；登录和管理台深层路由可刷新。
 - HTML、JS/CSS、库存 JPG 通过公网访问；`.env` 和 `package.json` 返回 404。
 - 原个人站首页 SHA-256 发布前后相同，`party-exam/`、`python-exam/` 和本地服务返回 200；穿透入口随后已关闭。
 - `npx tsc --noEmit`、`npm run build`、`git diff --check`、发布脚本 `bash -n`、服务器 `nginx -t` 通过。
 
-Supabase 的当前邮箱密码登录不依赖回调地址，因此本次没有修改 Auth 全局配置。以后增加密码邮件、OAuth 或学号入口时，应同步维护正式站点 URL、回调白名单及账号迁移规则。
+学号登录由 `student-login` Edge Function 在服务端将学号映射到内部 Auth 邮箱，再返回 Supabase session；前端仍只持有 publishable key。增加密码邮件、OAuth 或修改正式站点路径时，应同步维护正式站点 URL、回调白名单及账号迁移规则。

@@ -4,7 +4,7 @@
 
 ## 项目背景
 
-浙江某高校学部仓库数字化管理平台，用于管理物品借用、归还、库存查询等功能。
+信息技术学部仓库数字化管理平台，用于管理物品借用、归还、库存查询等功能。
 
 ### 仓库布局
 - **货架区域**: A、B、C、D 四个货架，每个货架4层（A1-A4, B1-B4, C1-C4, D1-D4）
@@ -75,31 +75,7 @@ b2
 
 ## 数据库设计（Supabase）
 
-```sql
--- 物品表
-CREATE TABLE items (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  location TEXT NOT NULL,
-  quantity TEXT,
-  description TEXT,
-  image_url TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 借用记录表
-CREATE TABLE borrow_records (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  item_id TEXT REFERENCES items(id),
-  borrower_name TEXT NOT NULL,
-  borrower_contact TEXT,
-  borrow_date TIMESTAMPTZ DEFAULT NOW(),
-  expected_return_date DATE,
-  actual_return_date TIMESTAMPTZ,
-  status TEXT CHECK (status IN ('borrowed', 'returned', 'overdue')),
-  notes TEXT
-);
-```
+正式结构见 `supabase/schema_v2.sql` 和 `supabase/migrations/`。库存存于 `inventory_items`，借用单与明细存于 `borrow_orders`、`borrow_items`，新增审批存于 `inventory_change_requests`，归还申请与逐件扫码记录存于 `borrow_return_requests`、`borrow_return_items`。Supabase Auth 与 `users.auth_user_id` 关联，权限由 RLS 和受控 RPC 执行。
 
 ## 当前数据
 
@@ -119,19 +95,23 @@ CREATE TABLE borrow_records (
 
 ## 仓库管理台
 
-登录后会先进入按角色分流的 dashboard；库存和业务管理台位于 `/app/*`。管理台支持按货架和层级查看物品，并管理编号、名称、规格、数量、图片文件名、位置和借用状态。正式库存与普通用户提交的变更申请相互隔离，只有超级管理员审批后才会改变正式数据。
+登录后会先进入按角色分流的 dashboard；开发环境管理台位于 `/app/*`，生产环境位于 `/513base/app/*`。管理台支持按货架和层级查看物品，并管理编号、名称、规格、数量、图片文件名、位置和借用状态。正式库存与待审批申请分表保存，审批完成前不会上架。
 
-库存列表支持批量勾选物品，普通用户可据此填写一张包含多件物品的借用单；借用状态会显示在物品列表和详情抽屉中。管理员可维护活动，借用单可关联启用中的活动。勾选库存后可导出只包含物品名称、编号和位置的 XLSX 清单，不包含图片。
+三个角色均可提出新增申请。普通用户的新增申请同步供本部门管理员和超级管理员审核，两方均通过后才进入正式库存；部门管理员或超级管理员提交的申请由其他超级管理员审核，不能自批。部门管理员仍可提出修改和删除申请，超级管理员保留正式库存管理权限。
+
+三个角色均可批量勾选物品填写借用单；勾选后主操作按钮切换为“填写借用单”。普通用户订单由本部门管理员或超级管理员审批；管理员自己的订单交由其他超级管理员处理。审批通过会直接进入“借出中”并记录数据库借出时间，库存列表和详情同步显示状态。管理员可维护活动，借用单可关联启用中的活动。勾选库存后可导出只包含物品名称、编号和位置的 XLSX 清单。
 
 权限分为三层：
 
-- `super_admin`：维护全部库存、部门、人员、借用订单和审批数据。
-- `admin`：分配给各部门部长或副部长，只能维护本部门普通用户，并监管本部门借用订单状态。
-- `member`：查看库存、批量提交借用申请、查看借用状态、提交二维码验证的归还申请（照片可选）；不显示库存变更申请入口。
+- `super_admin`：维护全部库存、部门、人员和审批数据，导入账号；可以申请新增和借用，不能审核自己提交的新增、借用或归还申请。
+- `admin`：维护本部门普通用户资料，审核本部门普通用户的新增、借用和归还申请；可以申请新增和借用，自己的申请由超级管理员审核。
+- `member`：查看库存、申请新增、批量借用、查看本人及被委托的借用状态、提交二维码验证的归还申请（照片可选）；不能直接修改正式库存。
 
 部门由超级管理员动态新增、编辑和删除。删除部门不会删除用户或历史订单，其部门字段会变为未分配。
 
-管理台使用 Supabase Auth 的邮箱/密码登录保护。`/` 是受保护路由；未登录访问会跳转到 `/login`。为避免任何访客自行注册后取得库存权限，前端不开放注册入口，请在 Supabase Dashboard 的 Authentication > Users 中邀请或创建账户。
+登录默认使用学号和密码，兼容原有邮箱账号。学号通过受限的 `student-login` Edge Function 验证，仍使用原 Supabase Auth 用户与 session，不会另建一套认证体系。学号会去除首尾空格并转为小写，数据库保证规范化后的唯一性。前端不开放注册；新导入账号必须先完成首次改密才能访问业务数据，改密门禁也由数据库权限执行。
+
+生产入口为 `https://lzmyselfai.cn/513base/`，登录为 `/513base/login`，管理台为 `/513base/app`。Vite 生产构建和 React Router 共用 `/513base/` 基路径；开发服务仍使用 `/login` 和 `/app`。未登录访问业务路由时会跳转登录，登录后保留原目标路径。
 
 ```bash
 npm install
@@ -161,23 +141,45 @@ npm run build
 在空的开发库中，Supabase SQL Editor 依次执行：
 
 1. `supabase/schema_v2.sql`
-2. `supabase/auth_and_rls.sql`
-3. `supabase/inventory_workflow.sql`
-4. `supabase/storage_images.sql`
-5. `supabase/migrations/202609220001_borrow_activities.sql`
-6. `supabase/migrations/202609270001_borrow_returns.sql`
-7. `supabase/migrations/202610060001_requirements.sql`
-8. `supabase/verify_setup.sql`（只读验证）
+2. `supabase/seed.sql`（仅全新开发库的 92 项初始库存）
+3. `supabase/auth_and_rls.sql`
+4. `supabase/inventory_workflow.sql`
+5. `supabase/storage_images.sql`
+6. `supabase/migrations/202609220001_borrow_activities.sql`
+7. `supabase/migrations/202609270001_borrow_returns.sql`
+8. `supabase/migrations/202610060001_requirements.sql`
+9. `supabase/migrations/20261007103248_workflow_approvals_and_return_delegates.sql`
+10. `supabase/migrations/20261007103355_student_login_account_import.sql`
+11. `supabase/migrations/20261007104410_concrete_borrow_locations.sql`
+12. `supabase/verify_setup.sql`（只读验证）
 
-现网项目已经执行过基础脚本和三条 migration；现网后续只运行审核后的 `supabase/migrations/*.sql` 与 `verify_setup.sql`，不要重复执行 seed 或基础结构脚本。
+现网项目 `cvurrazwebjtfffmkymn` 已执行基础脚本和以上六条 migration，包括 2026-10-07 的三条新迁移。现网后续只运行审核后的新 migration 与 `verify_setup.sql`，不要重复执行 seed 或基础结构脚本。
 
-然后在 Authentication > Providers 中启用 Email，并关闭公开注册（Allow new users to sign up）。在 Authentication > Users 中邀请或创建获准使用的账户；触发器会自动创建默认停用的 `member` 用户资料，再由超级管理员在后台分配角色、部门、职位并启用。在 Authentication > URL Configuration 中设置站点 URL。生产服务器需把未知路径回退到 `index.html`，确保直接访问 `/login` 时仍由 React Router 处理。
+三个账户 Edge Functions 已部署：`student-login`、`import-accounts`、`change-initial-password`。配置见 `supabase/config.toml`；学号登录允许匿名提交凭据，导入和改密服务会自行验证 bearer token，不能把关闭网关 JWT 校验理解为取消身份验证。服务端使用 Supabase 提供的环境变量，服务密钥不得进入前端或提交到仓库。
 
-首次启用时，在 Supabase Authentication 中创建第一个账号，再执行一次 SQL 将该账号对应的 `public.users.role` 改为 `super_admin`。不要在浏览器端使用 `service_role` 或 secret key。
+在 Authentication > Providers 中启用 Email，并关闭公开注册（Allow new users to sign up）；该开关仍需在生产配置复核。手工创建 Auth 用户时，触发器默认生成停用的 `member` 资料，再由超级管理员分配权限；受控 Excel 导入会关联 Auth 用户、分配角色和部门、启用资料并强制首次改密。在 Authentication > URL Configuration 中设置站点 URL。生产 Nginx 仅将 `/513base/` 下的业务路由回退到 `/513base/index.html`，确保登录和页面刷新不会影响同域其他项目。
 
-统一账号模板位于 `outputs/2026-09-21-account-import-template/account_import_template.xlsx`，包括 5 个超级管理员、10 个普通管理员和 100 个普通用户占位行。模板不包含真实密码，已填写的密码文件不得提交到 GitHub。
+首次启用时，在 Supabase Authentication 中创建第一个账号，再通过受信任的服务端操作将对应 `public.users.role` 设为 `super_admin` 并启用资料。不要在浏览器端使用 `service_role` 或 secret key。
 
-`inventory_location_history` 会在物品位置改变时自动记录原位置、新位置和时间。借用实际交付、归还申请提交和管理员确认归还均使用数据库时间并在页面显示到秒。归还必须逐件扫描并验证借出前位置对应的货架二维码，照片可选；照片保存在私有 `borrow-return-images` bucket，经管理员核验后订单才变为已归还。超级管理员可在公告管理中发布按角色定向的系统公告。
+## 账号 Excel 导入
+
+超级管理员可在人员管理下载模板、预览校验并批量导入部门、姓名、手机号、学号和身份，联系邮箱、职位、备注为可选字段。不存在的部门会自动建立；已存在的学号不会被覆盖。导入结果逐行显示，可下载失败报告。文件上限 5 MB、500 人，前端分批提交，服务端每次校验最多 50 行。
+
+当前模板为 `public/templates/account_import_template.xlsx`，交付副本位于 `outputs/2026-10-07-account-import/account_import_template.xlsx`，生成脚本为 `tools/create_student_account_template.mjs`。模板包含“账号导入模板”“填写说明”“部门与身份”三张表。服务统一设置初始密码，具体凭据通过私下交接提供；首次登录须设置包含字母和数字的 10 至 128 位新密码，不能继续使用初始密码。不要将已填写的人员资料或账号凭据提交到 GitHub。
+
+`outputs/2026-09-21-account-import-template/account_import_template.xlsx` 是旧的 115 个名额整理模板，保留作历史参考；新增导入应使用 2026-10-07 模板。
+
+## 二维码归还与代还
+
+打印文件为 `output/pdf/513base-二维码标识套装.pdf`，包含 19 个二维码：生产登录入口、A1 至 D4 的 16 个货架层位、地板 `FLOOR` 和门后 `DOOR`。生成脚本为 `tools/generate_qr_signage.py`。登录码内容是生产 URL；位置码内容为 `513-warehouse:{位置编码}`，供系统内归还扫描使用。
+
+归还必须逐件扫描借出前位置对应的官方二维码；前端扫描结果和数据库 RPC 均核对原位、位置码与二维码内容，并记录扫码提交时间。错误货架、待分层位置和缺少扫码信息均无法提交。照片可选，保存到私有 `borrow-return-images` bucket，经管理员核验后才完成归还。
+
+借用人可在“借出中”的订单上按学号指定已启用的同学代还，也可修改或取消委托。代还人使用自己的账号登录，看到被委托订单后逐件扫码提交；原借用人仍承担物品责任，记录保留原借用人、实际提交人及审核人。任何管理员不能审核自己借用或自己提交的归还申请。
+
+只有 A1 至 D4、FLOOR 和 DOOR 等具体位置可借出；`PENDING_A` 至 `PENDING_D` 的物品需先确认层位，新借用和审批均由数据库拦截。旧借出单若缺少具体归还位置，超级管理员可填写理由确认层位，操作写入审计日志。
+
+`inventory_location_history` 会记录位置变更。审批借出、归还提交和确认归还使用数据库时间并显示到秒；二维码扫描用于验证位置码，最终仍由管理员核验物品归位。超级管理员可发布按角色定向的公告。侧边栏底部提供开发者头像、GitHub 项目地址与联系工单入口。
 
 ## 当前验收状态
 
@@ -187,11 +189,17 @@ npm run build
 4. ✅ Supabase Auth、三层 RLS 权限与在线数据库
 5. ✅ 部门、人员、库存审批与借用监管后台
 6. ✅ 创建三个验收账号并完成端到端角色验收
-7. ✅ 当前版本已部署到 https://lzmyselfai.cn/513base/ （2026-10-07）
+7. ✅ 云端基线版本已部署到 https://lzmyselfai.cn/513base/ （2026-10-07）
+8. ✅ 2026-10-07 三条业务/认证迁移与三个账户 Edge Functions 已部署
+9. ✅ 远端账户集成测试 42 项通过，包含导入、学号精确匹配、首次改密、数据库门禁及越权拒绝
+
+本轮功能前端和远端数据库迁移已实现；浏览器回归已覆盖双重新增审批、三类身份借用、二维码归还、代还、Excel 导入和首次改密。同步到云端工作树后需重新执行静态发布和公网 smoke。真实手机摄像头、拍照/相册选择及移动网络表现仍需设备实测。
 
 验收账号见 `HANDOFF.md`；密码只在交接对话中提供，不写入仓库、脚本或配置文件。
 
-部署源码暂保留在 `/Users/love_zmyself/.codex/worktrees/513base-cloud/514base_hub`，其中 `deploy/README.md` 包含发布和回退说明。主工作区 `5174` 开发服务继续保留；内网穿透已关闭。学号登录、Excel 导入和新审批规则尚未进入本次云端版本。
+GitHub canonical 仓库为 `https://github.com/LoveZMyself11/513_warehouse_code.git`，旧的 `514_warehouse_code.git` 地址会重定向。已推送的 `10.7beta` 分支保存上云基线，发布提交为 `852d617`，分支交接记录提交为 `d72a900`；主工作区 `main` 的本轮功能改动尚待最终验收和发布。
+
+基线部署源码保留在 `/Users/love_zmyself/.codex/worktrees/513base-cloud/514base_hub`，其中 `deploy/README.md` 包含发布和回退说明。主工作区本地开发服务保留；ngrok 内网穿透已于 2026-10-07 按要求关闭。本项目继续使用 Supabase ref `cvurrazwebjtfffmkymn`，不涉及服务器上其他项目的 Supabase 服务。
 
 ## 约束条件
 
@@ -203,4 +211,10 @@ npm run build
 
 ## 联系方式
 
-项目负责人：love_zmyself
+开发者：李在明（Love_ZMyself），计算机应用技术 2406 班。
+
+GitHub：https://github.com/LoveZMyself11/513_warehouse_code
+
+技术支持建议发送邮件至 `lovezmyself0511@gmail.com`，说明部门、姓名、问题详情并附截图。WeChat：`Love_ZMyself`，QQ：`2944095143`。
+
+平静 坚毅 不流泪
