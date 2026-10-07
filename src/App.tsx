@@ -39,6 +39,7 @@ import { useAuth } from "./auth/AuthProvider";
 import { locationLabel, locations, parseLocationQr } from "./locations";
 import type { IScannerControls } from "@zxing/browser";
 import DeveloperContact from "./components/DeveloperContact";
+import LegalFooter from "./components/LegalFooter";
 import AccountImport from "./components/AccountImport";
 import { assetUrl } from "./lib/assetUrl";
 import type {
@@ -1643,6 +1644,7 @@ function App() {
           </>
         )}
       </main>
+      <LegalFooter />
 
       {editor && (
         <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setEditor(null)}>

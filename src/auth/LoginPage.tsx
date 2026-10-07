@@ -3,6 +3,7 @@ import { Boxes, IdCard, LockKeyhole } from "lucide-react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
 import { accountFunctionError } from "./accountApi";
+import LegalFooter from "../components/LegalFooter";
 
 interface LoginLocationState {
   from?: string;
@@ -92,7 +93,10 @@ export default function LoginPage() {
           </form>
         )}
       </section>
-      <p className="auth-footer">仅限仓库管理与借用人员使用</p>
+      <div className="auth-footer">
+        <p>仅限仓库管理与借用人员使用</p>
+        <LegalFooter />
+      </div>
     </main>
   );
 }

@@ -2,6 +2,7 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { Boxes, LoaderCircle, LogOut, ShieldAlert } from "lucide-react";
 import { useAuth } from "./AuthProvider";
 import ChangeInitialPassword from "./ChangeInitialPassword";
+import LegalFooter from "../components/LegalFooter";
 
 export default function ProtectedRoute() {
   const { client, session, profile, loading, profileError, mustChangePassword } = useAuth();
@@ -36,6 +37,7 @@ export default function ProtectedRoute() {
             <button className="secondary-button" onClick={() => client?.auth.signOut()}><LogOut size={17} />退出登录</button>
           </div>
         </section>
+        <LegalFooter />
       </main>
     );
   }

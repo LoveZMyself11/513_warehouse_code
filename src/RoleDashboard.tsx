@@ -20,6 +20,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./auth/AuthProvider";
 import type { UserRole } from "./types";
+import LegalFooter from "./components/LegalFooter";
 
 type DashboardView = "inventory" | "requests" | "departments" | "users" | "borrows" | "activities" | "announcements";
 
@@ -210,6 +211,7 @@ export default function RoleDashboard() {
 
         <section className="dashboard-announcements" aria-label="系统公告"><div className="dashboard-panel-heading"><div><p className="eyebrow">通知</p><h2>系统公告</h2></div><BellRing size={19} /></div>{announcements.length === 0 ? <p className="muted-text">暂无公告</p> : <div className="dashboard-announcement-list">{announcements.map((announcement) => <article key={announcement.id}><h3>{announcement.title}</h3><p>{announcement.content}</p><time>{new Date(announcement.starts_at).toLocaleString("zh-CN")}</time></article>)}</div>}</section>
       </main>
+      <LegalFooter />
     </div>
   );
 }

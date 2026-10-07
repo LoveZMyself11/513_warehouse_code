@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { Boxes, LockKeyhole, LogOut } from "lucide-react";
 import { useAuth } from "./AuthProvider";
 import { accountFunctionError } from "./accountApi";
+import LegalFooter from "../components/LegalFooter";
 
 export default function ChangeInitialPassword() {
   const { client, refreshProfile } = useAuth();
@@ -46,5 +47,6 @@ export default function ChangeInitialPassword() {
         <button className="secondary-button" type="button" onClick={() => void client?.auth.signOut()} disabled={submitting}><LogOut size={17} />退出登录</button>
       </form>
     </section>
+    <LegalFooter />
   </main>;
 }
