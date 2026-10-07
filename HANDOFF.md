@@ -197,9 +197,9 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 
 ## Git 状态
 
-- 当前分支：`main`，跟踪 `origin/main`。
-- Git 远程仓库：`https://github.com/LoveZMyself11/514_warehouse_code.git`；Supabase 项目名为 `514_warehouse_code`（产品名称为 513 仓库）。
-- `HEAD` 与 `origin/main` 仍在 `1dde4c9 Require approval for new Auth users`；当前工作区保留 cloud 改动和本次修复，尚未提交或推送。
+- 发布分支：`10.7beta`，跟踪 `origin/10.7beta`；发布提交为 `852d617 Release 10.7beta cloud deployment`。
+- GitHub canonical 仓库：`https://github.com/LoveZMyself11/513_warehouse_code.git`；旧地址 `514_warehouse_code.git` 会重定向。Supabase 项目名为 `514_warehouse_code`（产品名称为 513 仓库）。
+- `10.7beta` 已推送；主工作区 `main` 仍保留原始基线，尚未把后续业务需求合入主分支。
 - 2026-10-06 已通过 Supabase CLI 将远程数据库重建为当前 schema，迁移历史已修复为 `202609220001`、`202609270001`、`202610060001`。
 - `.env.local`、`dist/`、Supabase 临时目录和 Excel 预览/检查产物已由 `.gitignore` 排除。
 
