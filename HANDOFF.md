@@ -11,13 +11,13 @@
 
 - 发布源码和部署适配保留在独立工作树 `/Users/love_zmyself/.codex/worktrees/513base-cloud/514base_hub`；其中已带入当前主工作区未提交改动。
 - 主工作区的 `5174` 用于本地验收；ngrok 已按要求关闭。
-- 服务器版本目录 `/www/513base/releases/20261007-233251`，网站 `/www/wwwroot/lzmyselfai.cn/513base` 为指向该目录的链接。
-- 专属 Nginx 配置位于 `/www/server/panel/vhost/nginx/extension/lzmyselfai.cn/513base.conf`，回退记录位于 `/var/backups/513base/20261007-233251`。
+- 服务器版本目录 `/www/513base/releases/20261007-233847`，网站 `/www/wwwroot/lzmyselfai.cn/513base` 为指向该目录的链接。
+- 专属 Nginx 配置位于 `/www/server/panel/vhost/nginx/extension/lzmyselfai.cn/513base.conf`，回退记录位于 `/var/backups/513base/20261007-233847`。
 - 公网 Playwright 桌面和手机视口通过登录、dashboard、库存图片和路由刷新验收；未出现 JS/HTTP 错误，确认只连接本项目数据库。
 - 原个人站首页校验一致，两个原子站、本地服务和穿透入口仍返回 200。
 - 部署脚本、重发和回退说明见独立工作树的 `deploy/README.md`。
 
-本轮功能已发布到公网，云端工作树 `10.7beta` 已推送提交 `c01e2fa Add legal footer to application pages`；生产 smoke 已通过。登录、首次改密、账户不可用、角色工作台和仓库管理台均显示备案及版权底标。
+本轮功能已发布到公网，备案底标源码提交为 `24d834e Stack legal footer details on separate lines`；生产 smoke 已通过。登录、首次改密、账户不可用、角色工作台和仓库管理台均显示备案及版权底标，四条信息分别独占一行。
 
 ## 当前结论
 
@@ -205,7 +205,7 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 
 - 主工作区当前分支为 `main`，保留本地开发改动；部署工作树当前分支为 `10.7beta`，跟踪 `origin/10.7beta`。
 - Git 远程仓库：`https://github.com/LoveZMyself11/514_warehouse_code.git`；Supabase 项目名为 `514_warehouse_code`（产品名称为 513 仓库）。
-- 主工作区 `HEAD` 与 `origin/main` 仍在 `1dde4c9 Require approval for new Auth users`；本次发布源码提交为 `c01e2fa`，部署工作树已推送 GitHub。
+- 主工作区 `HEAD` 与 `origin/main` 仍在 `1dde4c9 Require approval for new Auth users`；本次发布源码提交为 `24d834e`，部署工作树已推送 GitHub。
 - 2026-10-07 已通过 Supabase CLI 将四条工作流/账号/位置迁移部署到远程，迁移历史已包含 `202609220001`、`202609270001`、`202610060001`、`20261007103248`、`20261007103355`、`20261007104410` 和 `20261007111047`。
 - `.env.local`、`dist/`、Supabase 临时目录和 Excel 预览/检查产物已由 `.gitignore` 排除。
 
@@ -227,7 +227,7 @@ supabase/migrations/202610060001_requirements.sql
 4. 待人工：现场确认 33 个待分层物品、7 个待识别名称、2 个区域总览项以及所有真实数量/规格。
 5. 已完成：人员管理中的 Excel 模板和批量导入流程已上线；正式导入前仍应先在小批量资料上验证部门、手机号和学号字段。
 6. 待设备验收：在真实手机浏览器上完成拍照、相册、超限文件和上传失败验收；现有 92 项 `/data/...` 图片仍未迁移，需单独规划批量上传和 URL 更新。
-7. 当前云端静态部署已验收域名、HTTPS、环境变量和子路径路由；`20261007-233251` 已通过生产 smoke，真实移动网络连接质量仍需持续观察。
+7. 当前云端静态部署已验收域名、HTTPS、环境变量和子路径路由；`20261007-233847` 已通过生产 smoke，真实移动网络连接质量仍需持续观察。
 8. 待工程化：增加自动化测试、lint、CI 和主包代码分包。
 
 ## 常用命令
