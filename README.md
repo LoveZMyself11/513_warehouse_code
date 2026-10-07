@@ -1,9 +1,11 @@
-# 513 仓库管理系统
-
 <div align="center">
+  <h1>513 仓库管理系统</h1>
   <strong>绿色线上版 · 移动端友好 · 学号登录 · 扫码归还</strong><br />
+  <br />
   <a href="https://lzmyselfai.cn/513base/">打开生产站点</a> ·
-  <a href="https://github.com/LoveZMyself11/513_warehouse_code">查看源码</a>
+  <a href="#快速开始">本地开发</a> ·
+  <a href="docs/WORKFLOWS.md">业务流程</a> ·
+  <a href="deploy/README.md">部署指南</a>
 </div>
 
 面向武汉纺织大学外经贸学院信息技术学部的仓库物品借用平台。系统把库存、位置、审批、借用、扫码归还、代还和人员管理放在同一个移动端友好的 Web 应用中，使用学号登录，适合在校园内通过手机完成现场操作。
@@ -13,6 +15,39 @@
 > 当前版本保留绿色线上界面，生产部署使用 `/513base/` 子路径。完整的开发、数据库初始化和发布说明分别见 [开发与环境准备](docs/GETTING_STARTED.md)、[业务流程](docs/WORKFLOWS.md)、[云端部署](deploy/README.md) 和 [交接记录](HANDOFF.md)。
 
 **技术栈**：React · TypeScript · Vite · Supabase Auth · PostgreSQL / RLS · Supabase Edge Functions
+
+## 界面预览
+
+真实绿色界面，截图使用仓库自带的初始库存与匿名演示账号，不包含线上人员资料或真实订单。
+
+![桌面库存管理台：按货架浏览、搜索物品、批量选择和查看库存状态](docs/images/inventory-desktop.png)
+
+<table>
+  <tr>
+    <th align="center">手机 · 学号登录</th>
+    <th align="center">手机 · 库存浏览</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/login-mobile.png" width="300" alt="手机学号登录页面，包含备案与版权底标" /></td>
+    <td align="center"><img src="docs/images/inventory-mobile.png" width="300" alt="手机库存页面，包含位置导航入口、库存统计与物品列表" /></td>
+  </tr>
+</table>
+
+<details>
+  <summary>查看角色工作台</summary>
+  <br />
+  <img src="docs/images/dashboard-desktop.png" alt="超级管理员工作台：库存统计、审批入口、人员管理和公告" />
+</details>
+
+## 文档导航
+
+| 任务 | 入口 |
+| --- | --- |
+| 安装、环境变量、空开发库初始化 | [开发与环境准备](docs/GETTING_STARTED.md) |
+| 角色边界、新增审批、借用与扫码归还 | [业务流程](docs/WORKFLOWS.md) |
+| 子路径部署、发布、验收与回退 | [云端部署](deploy/README.md) |
+| Excel 模板、二维码和资料生成 | [工具说明](tools/README.md) |
+| 当前状态、历史验收与接手事项 | [交接记录](HANDOFF.md) |
 
 ## 能做什么
 
@@ -171,7 +206,9 @@ deploy/          # Nginx、静态发布和回退脚本
 
 静态站点部署不需要 Node 常驻进程，只需要现有服务器的 Nginx。发布脚本会执行类型检查、构建、上传独立 release、原子切换 symlink，并在失败时回退。详见 [`deploy/README.md`](deploy/README.md)。
 
-当前生产版本已在桌面和手机视口完成登录、路由刷新、库存图片、三类角色审批、借用、二维码归还、代还和 Excel 模板回归。真实手机摄像头、相册选择和移动网络仍需在目标设备补验；项目目前没有 lint、CI 或自动化浏览器测试。
+2026-10-07 的功能验收已覆盖三类角色审批、借用、二维码归还、代还和 Excel 模板；生产 smoke 覆盖桌面/手机视口下的登录、路由刷新、工作台和库存图片。2026-10-08 的目录整理通过 `npm run check`，并用匿名样本完成浏览器搜索、移动端侧栏、图片加载、页面溢出和未登录跳转检查。
+
+真实手机摄像头、相册选择和移动网络仍需在目标设备补验；项目目前没有 lint、CI 或入库的自动化浏览器测试。
 
 ## 维护者与支持
 

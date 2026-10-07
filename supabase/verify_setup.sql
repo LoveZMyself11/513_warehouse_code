@@ -12,7 +12,8 @@ WITH expected_tables(table_name) AS (
     ('borrow_return_requests'),
     ('borrow_return_items'),
     ('operation_logs'),
-    ('inventory_change_requests')
+    ('inventory_change_requests'),
+    ('system_announcements')
 ),
 actual_tables AS (
   SELECT tablename AS table_name
@@ -55,7 +56,7 @@ relevant_policies AS (
   SELECT tablename, policyname, cmd
   FROM pg_policies
   WHERE schemaname = 'public'
-    AND tablename IN ('users', 'departments', 'activities', 'borrow_orders', 'borrow_items', 'borrow_return_requests', 'borrow_return_items', 'inventory_items')
+    AND tablename IN ('users', 'departments', 'activities', 'borrow_orders', 'borrow_items', 'borrow_return_requests', 'borrow_return_items', 'inventory_items', 'system_announcements')
 ),
 storage_policies AS (
   SELECT policyname, cmd

@@ -3,7 +3,7 @@
 > 更新日期：2026-10-08（Asia/Shanghai）
 > 发布整理工作树：`/Users/love_zmyself/.codex/worktrees/513base-cloud/514base_hub`
 > 主工作区：`/Users/love_zmyself/all_school_work/514base_hub`（保留本地未提交改动，不作为本次发布源）
-> 本次验收地址：`http://localhost:5174/`（默认端口为 `5173`）
+> 2026-10-08 整理版预览：`http://localhost:5180/`；此前功能验收使用 `5174`（默认端口为 `5173`）
 > Supabase 项目：`514_warehouse_code`（产品名称：513 仓库；ref：`cvurrazwebjtfffmkymn`）
 
 ## 2026-10-07 云端发布
@@ -67,7 +67,7 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 - `npm run build` 通过；Vite 仍提示主包超过 500 KB，以及依赖的 `use client` module directive 警告，均不阻断构建。
 - `git diff --check` 通过。
 - 已用三个角色完成 REST 端到端流程：普通用户提交借用、管理员审批并标记借出、普通用户提交二维码位置归还申请（不上传照片）、管理员确认归还；测试订单最终为 `returned`。
-- 远程 `verify_setup.sql` 已确认 92 条库存、13 张业务表启用 RLS、公告/活动/归还 RPC 存在、归还图片 bucket 为私有、匿名用户不能读取正式库存。
+- 远程 `verify_setup.sql` 曾确认 92 条库存、检查集合中的 12 张业务表启用 RLS、活动/归还 RPC 存在、归还图片 bucket 为私有、匿名用户不能读取正式库存。公告表当时不在脚本的 RLS 检查集合中；2026-10-08 已补入检查集合，结果见本轮整理记录。
 - 远端 Supabase 已部署 `20261007103248_workflow_approvals_and_return_delegates.sql`、`20261007103355_student_login_account_import.sql`、`20261007104410_concrete_borrow_locations.sql` 和 `20261007111047_require_review_for_inventory_additions.sql`；学号登录、账号导入、首次改密和权限边界测试通过。
 - 浏览器回归已通过双重新增审批、三类身份借用、审批即进入借出中、错误/正确二维码、代还责任归属、管理员验收和 Excel 模板下载；重复运行时若复用仍在借用的测试物品，数据库会按预期拒绝重复借用。
 
@@ -76,11 +76,13 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 - 保留已验证的绿色线上界面；页面文件整理为 `src/pages/`，样式整理为 `src/styles/main.css`，并同步修正 Router、构建和静态资源引用。
 - 根目录库存资料归档到 `fixtures/inventory/`，历史工具归档到 `tools/legacy/`，可复用库存工具归档到 `tools/inventory/`；交付模板和二维码归档到 `artifacts/`，历史说明归档到 `docs/archive/`。
 - 新增 `docs/GETTING_STARTED.md`、`docs/WORKFLOWS.md` 和 `tools/README.md`；README 补充角色边界、流程图、目录导航、数据库初始化、Excel 导入和部署验收说明。
+- README 加入桌面库存、角色工作台、手机登录与手机库存的真实界面截图；截图使用 92 项初始库存和匿名演示资料，不读取线上人员或订单。
 - 部门管理员可维护本部门活动；普通管理员与超级管理员均可发起借用；审批通过后立即进入借出中；新增物品按申请人完成部门/超级管理员审批后上架。
-- 本轮验证：`npm run check`、脚本语法检查、相对链接检查、`git diff --check` 均通过；运行时样式与生产页面行为保持线上已验收版本。
-- 发布记录：本整理提交完成后以普通快进方式推送 `origin/main`，不强推；在线服务未因本轮文档与目录整理重新部署。
+- 本轮验证：`npm run check`、脚本语法检查、相对链接检查、`git diff --check` 均通过；绿色样式与 `83a09a8` 完全一致。Playwright 在 1440×980 和 390×844 视口检查样本库存、搜索、图片加载、页面横向溢出、移动侧栏和未登录跳转，均通过；本轮未重复执行会写入业务数据的回归。
+- `verify_setup.sql` 补入公告表后已在本项目执行只读验收：13 张业务表均启用 RLS、必需表无缺失、归还图片 bucket 私有、匿名库存读取权限为 `false`，库存条数为 92；未修改数据库结构或业务数据。实时编号 sequence 已为 171，部门数为 10，下方旧快照中的 92/8 不代表当前 sequence 和部门数。
+- 发布记录：整理提交 `8e75f0e` 已以普通快进方式推送 `origin/main`；后续预览图与交接勘误采用独立跟进提交。在线服务未因本轮文档与目录整理重新部署。
 
-目前没有自动化浏览器测试、lint 或 CI 脚本；仓库保留两份 SQL 回归脚本，浏览器端的真实摄像头和手机文件选择仍需在目标设备补验。
+目前没有入库的自动化浏览器测试、lint 或 CI 脚本；本轮截图检查使用临时 Playwright 脚本。仓库保留两份 SQL 回归脚本，浏览器端的真实摄像头和手机文件选择仍需在目标设备补验。
 
 ## 登录与测试账号
 
@@ -112,7 +114,7 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 
 ## Supabase 数据库状态
 
-最近一次远程验证已确认以下 13 张 `public` 表存在并启用 RLS：
+截至 2026-10-07 的历史记录包含以下 13 张 `public` 业务表；旧版 `verify_setup.sql` 的 RLS 检查覆盖其中 12 张，遗漏了 `system_announcements`，该检查遗漏已在本轮补齐：
 
 1. `inventory_locations`
 2. `inventory_items`
@@ -149,7 +151,7 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
   - `submit_borrow_return_request`
   - `review_borrow_return_request`
 
-这些是 2026-10-06 已执行的远程核验结果；远程状态可再次在 SQL Editor 执行只读脚本 `supabase/verify_setup.sql` 核对。
+上述数量、编号 sequence 和 RPC 清单是此前交接留下的历史快照，不能作为实时库存或完整 RPC 清单；远程状态可再次在 SQL Editor 执行只读脚本 `supabase/verify_setup.sql` 核对。
 
 ### SQL 文件
 
@@ -167,7 +169,7 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 - `supabase/migrations/20261007111047_require_review_for_inventory_additions.sql`：关闭直接新增库存的旁路。
 - `supabase/verify_setup.sql`：只读验收查询。
 
-开发库从空库重建时按 `schema_v2.sql`、`seed.sql`、`auth_and_rls.sql`、`inventory_workflow.sql`、`storage_images.sql` 顺序执行，最后执行 `verify_setup.sql`。现网项目已完成重建，后续只执行审核后的 migration 和 `verify_setup.sql`，不要直接重跑带结构变更或 seed 的基础脚本。
+开发库从空库重建时依次执行 `schema_v2.sql`、可选的 `seed.sql`（仅用于空开发库）、`auth_and_rls.sql`、`inventory_workflow.sql`、`storage_images.sql`，再按文件名顺序执行上述七条迁移，最后执行 `verify_setup.sql`。完整操作见 [开发与环境准备](docs/GETTING_STARTED.md)。现网项目已完成重建，后续只执行审核后的 migration 和 `verify_setup.sql`，不要直接重跑带结构变更或 seed 的基础脚本。
 
 ## 前端与业务实现
 
@@ -221,7 +223,7 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 
 - 主工作区当前分支为 `main`，保留本地开发改动；发布整理工作树使用 `codex/repository-polish`，基于 `10.7beta` 的 `83a09a8`。
 - Git 远程仓库：`https://github.com/LoveZMyself11/513_warehouse_code.git`；Supabase 项目名仍为 `514_warehouse_code`（产品名称为 513 仓库）。
-- 本次整理完成后将验证后的提交以普通快进方式推送至 `origin/main`，不强推、不切换脏主工作区。
+- 整理提交 `8e75f0e` 已以普通快进方式推送至 `origin/main`，远程已核实；预览图和交接勘误另作跟进提交，主工作区的本地改动继续保留。
 - 2026-10-07 已通过 Supabase CLI 将四条工作流/账号/位置迁移部署到远程，迁移历史已包含 `202609220001`、`202609270001`、`202610060001`、`20261007103248`、`20261007103355`、`20261007104410` 和 `20261007111047`。
 - `.env.local`、`dist/`、Supabase 临时目录、历史工具输出和 Excel 预览/检查产物已由 `.gitignore` 排除。
 
