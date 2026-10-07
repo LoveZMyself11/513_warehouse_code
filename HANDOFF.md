@@ -1,7 +1,8 @@
 # 513 仓库管理系统交接
 
-> 更新日期：2026-10-07（Asia/Shanghai）
-> 项目目录：`/Users/love_zmyself/all_school_work/514base_hub`
+> 更新日期：2026-10-08（Asia/Shanghai）
+> 发布整理工作树：`/Users/love_zmyself/.codex/worktrees/513base-cloud/514base_hub`
+> 主工作区：`/Users/love_zmyself/all_school_work/514base_hub`（保留本地未提交改动，不作为本次发布源）
 > 本次验收地址：`http://localhost:5174/`（默认端口为 `5173`）
 > Supabase 项目：`514_warehouse_code`（产品名称：513 仓库；ref：`cvurrazwebjtfffmkymn`）
 
@@ -16,6 +17,8 @@
 - 公网 Playwright 桌面和手机视口通过登录、dashboard、库存图片和路由刷新验收；未出现 JS/HTTP 错误，确认只连接本项目数据库。
 - 原个人站首页校验一致，两个原子站、本地服务和穿透入口仍返回 200。
 - 部署脚本、重发和回退说明见独立工作树的 `deploy/README.md`。
+
+- 本次文档与目录整理基于已验证的 `10.7beta`，在独立工作树完成；不会改写主工作区的本地改动。
 
 本轮功能已发布到公网，备案底标源码提交为 `24d834e Stack legal footer details on separate lines`；生产 smoke 已通过。登录、首次改密、账户不可用、角色工作台和仓库管理台均显示备案及版权底标，四条信息分别独占一行。
 
@@ -42,7 +45,7 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 - 部门动态新增、编辑、删除。
 - 用户资料、角色、部门、职位和启用状态管理。
 - 普通管理员只管理本部门普通用户，只监管本部门借用订单；普通管理员和超级管理员也可以像普通用户一样发起借用，但不能审批自己的借用。
-- 借用申请和 `待审批 -> 已批准 -> 借出中 -> 待审核归还 -> 已归还/已取消` 状态监管。
+- 借用申请和 `待审批 -> 借出中 -> 待审核归还 -> 已归还/已取消` 状态监管；审批通过即借出。
 - 普通用户可批量勾选库存填写借用单；订单支持关联活动，借出后库存显示借出摘要和实际借出时间。
 - 普通用户导航显示“借用状态”，首页在有未归还物品时显示提醒；归还必须逐件扫描货架二维码并确认已放回借出前原位，现场照片可选。
 - 管理员审核归还申请后订单才会变为已归还；借用交付、归还提交、归还确认时间由数据库记录并显示到秒。
@@ -68,11 +71,20 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 - 远端 Supabase 已部署 `20261007103248_workflow_approvals_and_return_delegates.sql`、`20261007103355_student_login_account_import.sql`、`20261007104410_concrete_borrow_locations.sql` 和 `20261007111047_require_review_for_inventory_additions.sql`；学号登录、账号导入、首次改密和权限边界测试通过。
 - 浏览器回归已通过双重新增审批、三类身份借用、审批即进入借出中、错误/正确二维码、代还责任归属、管理员验收和 Excel 模板下载；重复运行时若复用仍在借用的测试物品，数据库会按预期拒绝重复借用。
 
-目前没有自动化测试、lint 或 CI 脚本；浏览器端的真实摄像头和手机文件选择仍需在目标设备补验。
+## 2026-10-08 文档与目录整理
+
+- 保留已验证的绿色线上界面；页面文件整理为 `src/pages/`，样式整理为 `src/styles/main.css`，并同步修正 Router、构建和静态资源引用。
+- 根目录库存资料归档到 `fixtures/inventory/`，历史工具归档到 `tools/legacy/`，可复用库存工具归档到 `tools/inventory/`；交付模板和二维码归档到 `artifacts/`，历史说明归档到 `docs/archive/`。
+- 新增 `docs/GETTING_STARTED.md`、`docs/WORKFLOWS.md` 和 `tools/README.md`；README 补充角色边界、流程图、目录导航、数据库初始化、Excel 导入和部署验收说明。
+- 部门管理员可维护本部门活动；普通管理员与超级管理员均可发起借用；审批通过后立即进入借出中；新增物品按申请人完成部门/超级管理员审批后上架。
+- 本轮验证：`npm run check`、脚本语法检查、相对链接检查、`git diff --check` 均通过；运行时样式与生产页面行为保持线上已验收版本。
+- 发布记录：本整理提交完成后以普通快进方式推送 `origin/main`，不强推；在线服务未因本轮文档与目录整理重新部署。
+
+目前没有自动化浏览器测试、lint 或 CI 脚本；仓库保留两份 SQL 回归脚本，浏览器端的真实摄像头和手机文件选择仍需在目标设备补验。
 
 ## 登录与测试账号
 
-登录页使用 Supabase Auth 的邮箱和密码登录：`http://localhost:5173/login`。
+登录页默认使用学号和密码，通过 Edge Function 取得同一 Supabase Auth session，兼容历史邮箱账号。开发入口为 `http://localhost:5173/login`，生产入口为 `https://lzmyselfai.cn/513base/login`。
 
 已创建并启用以下验收账号：
 
@@ -92,9 +104,9 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 
 | 角色 | 权限边界 |
 |---|---|
-| `super_admin`（超级管理员） | 所有后台数据管理；直接 CRUD 正式库存；审批库存变更；CRUD 部门；调整所有人员角色、部门和启用状态；监管所有部门借用订单。 |
+| `super_admin`（超级管理员） | 所有后台数据管理；直接修改、删除正式库存；新增仍须其他超级管理员审批；审批库存变更；管理部门与人员；监管所有部门借用订单。 |
 | `admin`（普通管理员） | 用于各部门部长/副部长；提交库存变更申请；维护本部门 `member` 资料和启用状态；查看并处理本部门借用订单；不能修改角色、部门或 Auth 绑定。 |
-| `member`（普通用户） | 查看已批准库存；提交借用申请；查看借用状态；提交二维码验证的归还申请，照片可选；不能修改正式库存或提交库存变更。 |
+| `member`（普通用户） | 查看正式库存；提交新增和借用申请；查看本人及被委托订单；提交二维码验证的归还申请，照片可选；不能直接修改正式库存。 |
 
 权限由数据库 RLS 和受控 RPC 执行，不只依赖前端隐藏按钮。角色授权依据 `public.users.role` 和 `is_active`，不使用用户可编辑的 `user_metadata`。
 
@@ -149,6 +161,10 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 - `supabase/migrations/202609220001_borrow_activities.sql`：活动管理、批量借用事务、借出时间、借用摘要和相关 RLS。
 - `supabase/migrations/202609270001_borrow_returns.sql`：借用位置快照、归还申请/明细、私有照片存储、管理员核验、秒级审计时间和相关 RLS。
 - `supabase/migrations/202610060001_requirements.sql`：系统公告、货架二维码 payload、可选归还照片和相关 RLS。
+- `supabase/migrations/20261007103248_workflow_approvals_and_return_delegates.sql`：双重新增审批、审批即借出和委托代还。
+- `supabase/migrations/20261007103355_student_login_account_import.sql`：学号登录、账号导入和首次改密。
+- `supabase/migrations/20261007104410_concrete_borrow_locations.sql`：具体借出位置约束和历史位置修正。
+- `supabase/migrations/20261007111047_require_review_for_inventory_additions.sql`：关闭直接新增库存的旁路。
 - `supabase/verify_setup.sql`：只读验收查询。
 
 开发库从空库重建时按 `schema_v2.sql`、`seed.sql`、`auth_and_rls.sql`、`inventory_workflow.sql`、`storage_images.sql` 顺序执行，最后执行 `verify_setup.sql`。现网项目已完成重建，后续只执行审核后的 migration 和 `verify_setup.sql`，不要直接重跑带结构变更或 seed 的基础脚本。
@@ -158,19 +174,19 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 主要文件：
 
 - `src/main.tsx`：Router、AuthProvider、受保护路由。
-- `src/RoleDashboard.tsx`：按角色分流的系统管理员、部门管理员和普通用户工作台。
+- `src/pages/DashboardPage.tsx`：按角色分流的系统管理员、部门管理员和普通用户工作台。
 - `src/auth/AuthProvider.tsx`：Supabase session 和 `public.users` 资料加载。
 - `src/auth/LoginPage.tsx`：学号登录入口；`src/auth/accountApi.ts`：学号登录、账号导入和首次改密 API。
 - `src/auth/ProtectedRoute.tsx`：未登录跳转、未关联/停用账号拦截。
-- `src/App.tsx`：库存、审批、人员、部门和借用管理 UI。
+- `src/pages/InventoryPage.tsx`：库存、审批、人员、部门和借用管理 UI。
 - `src/lib/supabase.ts`：Supabase 客户端初始化。
-- `src/styles.css`：桌面和移动端样式。
+- `src/styles/main.css`：桌面和移动端样式。
 
 前端一次加载正式库存、位置历史、变更申请、部门、可见用户、借用订单、归还申请和归还明细。RLS 根据当前用户角色和部门过滤实际可见数据。归还照片使用私有 bucket 和短时签名 URL。
 
 库存写入规则：
 
-- 超级管理员通过 RPC 直接新增、修改、删除正式库存。
+- 超级管理员通过 RPC 直接修改、删除正式库存；新增必须通过申请和独立审批。
 - 三类身份都通过 `inventory_change_requests` 提交新增申请；普通用户必须等待部门管理员和超级管理员，管理员申请等待超级管理员，超级管理员不能审批自己的申请。
 - 所有审批完成后，受控 RPC 才把请求同步到 `inventory_items`；数据库已撤销直接插入库存和直接执行创建 RPC 的权限。
 - 正式库存与待审批请求是不同表，页面统计只把已批准数据算作库存。
@@ -187,7 +203,7 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 - 初始数量目前多数为“若干”，不能视为真实盘点数量。
 - 不要把 `PENDING_A` 等待分层位置改写成 `A0/B0/C0/D0`。
 
-上游图片清单为 `inventory_image_manifest.csv`。`tools/generate_inventory_assets.py` 会重新生成前端数据和 seed，但会把数量重置为“若干”，因此不能用它覆盖已经在线发生的业务修改。
+上游图片清单位于 `fixtures/inventory/inventory_image_manifest.csv`。`tools/inventory/generate_inventory_assets.py` 会重新生成初始数据和 seed，但会把数量重置为“若干”，因此不能用它覆盖已经在线发生的业务修改。
 
 ## 账号 Excel 模板
 
@@ -195,19 +211,19 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 
 `public/templates/account_import_template.xlsx`
 
-交付副本位于：`outputs/2026-10-07-account-import/account_import_template.xlsx`。
+交付副本位于：`artifacts/account-import/2026-10-07-account-import/account_import_template.xlsx`。
 
 模板包含“账号导入模板”“填写说明”“部门与身份”三张表，字段包括部门、姓名、手机号、学号、身份、联系邮箱、职位和备注。超级管理员在“人员管理”中上传后，系统逐行校验并创建 Auth 用户和 `public.users` 资料。
 
-导入账号默认使用统一初始密码 `513base123`，首次登录必须改成 10 至 128 位且同时含字母和数字的新密码；初始密码只在交接中说明，不写入 Git。模板下载和导入解析均已通过浏览器验收。
+导入账号默认使用统一初始密码，首次登录必须改成 10 至 128 位且同时含字母和数字的新密码。真实账号凭据通过私下交接提供；模板下载和导入解析均已通过浏览器验收。
 
 ## Git 状态
 
-- 主工作区当前分支为 `main`，保留本地开发改动；部署工作树当前分支为 `10.7beta`，跟踪 `origin/10.7beta`。
-- Git 远程仓库：`https://github.com/LoveZMyself11/514_warehouse_code.git`；Supabase 项目名为 `514_warehouse_code`（产品名称为 513 仓库）。
-- 主工作区 `HEAD` 与 `origin/main` 仍在 `1dde4c9 Require approval for new Auth users`；本次发布源码提交为 `24d834e`，部署工作树已推送 GitHub。
+- 主工作区当前分支为 `main`，保留本地开发改动；发布整理工作树使用 `codex/repository-polish`，基于 `10.7beta` 的 `83a09a8`。
+- Git 远程仓库：`https://github.com/LoveZMyself11/513_warehouse_code.git`；Supabase 项目名仍为 `514_warehouse_code`（产品名称为 513 仓库）。
+- 本次整理完成后将验证后的提交以普通快进方式推送至 `origin/main`，不强推、不切换脏主工作区。
 - 2026-10-07 已通过 Supabase CLI 将四条工作流/账号/位置迁移部署到远程，迁移历史已包含 `202609220001`、`202609270001`、`202610060001`、`20261007103248`、`20261007103355`、`20261007104410` 和 `20261007111047`。
-- `.env.local`、`dist/`、Supabase 临时目录和 Excel 预览/检查产物已由 `.gitignore` 排除。
+- `.env.local`、`dist/`、Supabase 临时目录、历史工具输出和 Excel 预览/检查产物已由 `.gitignore` 排除。
 
 ## 云端迁移、账号与后续事项
 
@@ -217,6 +233,10 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 supabase/migrations/202609220001_borrow_activities.sql
 supabase/migrations/202609270001_borrow_returns.sql
 supabase/migrations/202610060001_requirements.sql
+supabase/migrations/20261007103248_workflow_approvals_and_return_delegates.sql
+supabase/migrations/20261007103355_student_login_account_import.sql
+supabase/migrations/20261007104410_concrete_borrow_locations.sql
+supabase/migrations/20261007111047_require_review_for_inventory_additions.sql
 ```
 
 `missing_required_tables` 为空，归还字段与 RPC 均存在，`borrow_return_image_bucket.public` 为 `false`。
@@ -283,8 +303,8 @@ npm run preview
 
 ### 代码变更位置
 
-- `src/App.tsx`：移动端图片校验、预览、Storage 上传、失败清理和编号提示
-- `src/styles.css`：移动端抽屉与图片预览样式
+- `src/pages/InventoryPage.tsx`：移动端图片校验、预览、Storage 上传、失败清理和编号提示
+- `src/styles/main.css`：移动端抽屉与图片预览样式
 - `supabase/storage_images.sql`：Storage bucket 与 RLS 策略
 
 ### 后续建议

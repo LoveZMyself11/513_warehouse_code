@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build",
     "build": "vite build && cp -R data dist/data",
     "preview": "vite preview --host 0.0.0.0"
   },

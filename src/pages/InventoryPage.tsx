@@ -35,13 +35,13 @@ import {
   X,
 } from "lucide-react";
 import { useLocation } from "react-router-dom";
-import { useAuth } from "./auth/AuthProvider";
-import { locationLabel, locations, parseLocationQr } from "./locations";
+import { useAuth } from "../auth/AuthProvider";
+import { locationLabel, locations, parseLocationQr } from "../locations";
 import type { IScannerControls } from "@zxing/browser";
-import DeveloperContact from "./components/DeveloperContact";
-import LegalFooter from "./components/LegalFooter";
-import AccountImport from "./components/AccountImport";
-import { assetUrl } from "./lib/assetUrl";
+import DeveloperContact from "../components/DeveloperContact";
+import LegalFooter from "../components/LegalFooter";
+import AccountImport from "../components/AccountImport";
+import { assetUrl } from "../lib/assetUrl";
 import type {
   Activity,
   ActivityStatus,
@@ -54,7 +54,7 @@ import type {
   LocationHistory,
   ManagedUser,
   UserRole,
-} from "./types";
+} from "../types";
 
 type Selection = "ALL" | "PENDING" | string;
 type EditorMode = "create" | "edit";

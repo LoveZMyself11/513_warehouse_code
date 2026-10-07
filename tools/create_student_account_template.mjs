@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { Workbook, SpreadsheetFile } from "@oai/artifact-tool";
 
-const root = process.cwd();
-const outputDir = path.join(root, "outputs/2026-10-07-account-import");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const outputDir = path.join(root, "artifacts/account-import/2026-10-07-account-import");
 const workbook = Workbook.create();
 const template = workbook.worksheets.add("账号导入模板");
 const instructions = workbook.worksheets.add("填写说明");

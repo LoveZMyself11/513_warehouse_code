@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import List, Dict
 import base64
 
+ROOT = Path(__file__).resolve().parents[2]
+OUTPUT_DIR = ROOT / "artifacts" / "legacy" / "wechat-import"
+
 # 位置规范化映射
 LOCATION_MAP = {
     'a1': 'A1', 'a2': 'A2', 'a3': 'A3', 'a4': 'A4',
@@ -92,7 +95,7 @@ class WeChatInventoryProcessor:
         self.items.append(item)
         print(f"✅ 添加: {item_id} | {item_name} | {location} | {quantity}")
 
-    def export_csv(self, output_path: str = 'inventory.csv'):
+    def export_csv(self, output_path: str | Path = 'inventory.csv'):
         """导出为 CSV"""
         if not self.items:
             print("⚠️  没有数据可导出")
@@ -106,7 +109,7 @@ class WeChatInventoryProcessor:
 
         print(f"📄 CSV已导出: {output_path}")
 
-    def export_json(self, output_path: str = 'inventory.json'):
+    def export_json(self, output_path: str | Path = 'inventory.json'):
         """导出为 JSON"""
         if not self.items:
             print("⚠️  没有数据可导出")
@@ -117,7 +120,7 @@ class WeChatInventoryProcessor:
 
         print(f"📄 JSON已导出: {output_path}")
 
-    def export_supabase_sql(self, output_path: str = 'inventory_import.sql'):
+    def export_supabase_sql(self, output_path: str | Path = 'inventory_import.sql'):
         """生成 Supabase SQL 导入脚本"""
         if not self.items:
             print("⚠️  没有数据可导出")
@@ -211,15 +214,16 @@ def main():
 
     # 导出文件
     print("\n正在导出文件...")
-    processor.export_csv('inventory.csv')
-    processor.export_json('inventory.json')
-    processor.export_supabase_sql('inventory_import.sql')
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    processor.export_csv(OUTPUT_DIR / 'inventory.csv')
+    processor.export_json(OUTPUT_DIR / 'inventory.json')
+    processor.export_supabase_sql(OUTPUT_DIR / 'inventory_import.sql')
 
     print("\n✅ 处理完成！")
-    print("生成的文件：")
+    print(f"生成的文件位于：{OUTPUT_DIR}")
     print("  - inventory.csv (Excel可打开)")
     print("  - inventory.json (程序可读)")
-    print("  - inventory_import.sql (Supabase导入)")
+    print("  - inventory_import.sql (历史结构，仅供离线审阅)")
 
 
 if __name__ == '__main__':

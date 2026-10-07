@@ -7,12 +7,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "inventory_image_manifest.csv"
-JSON_OUTPUT = ROOT / "src" / "inventory-data.json"
-JSON_EXPORT = ROOT / "inventory.json"
+ROOT = Path(__file__).resolve().parents[2]
+FIXTURES_DIR = ROOT / "fixtures" / "inventory"
+MANIFEST = FIXTURES_DIR / "inventory_image_manifest.csv"
+JSON_EXPORT = FIXTURES_DIR / "inventory.json"
 SQL_OUTPUT = ROOT / "supabase" / "seed.sql"
-EXPORT_OUTPUT = ROOT / "inventory.csv"
+EXPORT_OUTPUT = FIXTURES_DIR / "inventory.csv"
 
 
 def sql_literal(value: str | int) -> str:
@@ -61,7 +61,6 @@ def main() -> None:
         )
 
     json_text = json.dumps(items, ensure_ascii=False, indent=2) + "\n"
-    JSON_OUTPUT.write_text(json_text, encoding="utf-8")
     JSON_EXPORT.write_text(json_text, encoding="utf-8")
 
     with EXPORT_OUTPUT.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -83,8 +82,9 @@ def main() -> None:
             )
 
     sql_lines = [
-        "-- Generated from inventory_image_manifest.csv.",
-        "-- Run schema.sql first, then this file.",
+        "-- Generated from fixtures/inventory/inventory_image_manifest.csv.",
+        "-- For an empty development database only: run schema_v2.sql first.",
+        "-- Never reapply this seed to a live database; it overwrites inventory fields.",
         "",
         "INSERT INTO inventory_items",
         "  (id, name, location_code, quantity, image_path, recognition_status, source_sequence)",

@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { SpreadsheetFile, Workbook } from "@oai/artifact-tool";
 
-const outputDir = "/Users/love_zmyself/all_school_work/514base_hub/outputs/2026-09-21-account-import-template";
+const root = fileURLToPath(new URL("../../", import.meta.url));
+const outputDir = path.join(root, "artifacts/legacy/account-import");
 const outputPath = `${outputDir}/account_import_template.xlsx`;
-const previewDir = `${outputDir}/previews`;
+const previewDir = path.join(outputDir, "previews");
 const fontFamily = "Arial";
 const departments = ["未分配", "宣传部", "组织部", "竞赛办公室", "文体部", "文艺部", "红承志愿服务队", "学风督导部", "生活部"];
 
@@ -155,7 +158,7 @@ const previews = [
 ];
 for (const [sheetName, range, fileName] of previews) {
   const preview = await workbook.render({ sheetName, range, scale: 1.5, format: "png" });
-  await fs.writeFile(`${previewDir}/${fileName}.png`, new Uint8Array(await preview.arrayBuffer()));
+  await fs.writeFile(path.join(previewDir, `${fileName}.png`), new Uint8Array(await preview.arrayBuffer()));
 }
 
 await fs.mkdir(outputDir, { recursive: true });

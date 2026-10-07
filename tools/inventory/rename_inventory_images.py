@@ -6,9 +6,9 @@ import re
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
-MANIFEST = ROOT / "inventory_image_manifest.csv"
+MANIFEST = ROOT / "fixtures" / "inventory" / "inventory_image_manifest.csv"
 
 # (WeChat sequence, item name, visual review status)
 ITEMS = [

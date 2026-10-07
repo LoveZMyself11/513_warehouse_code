@@ -14,8 +14,8 @@ from reportlab.pdfgen import canvas
 from reportlab.graphics import renderPDF
 
 ROOT = Path(__file__).resolve().parents[1]
-QR_DIR = ROOT / "output" / "qr"
-PDF_PATH = ROOT / "output" / "pdf" / "513base-二维码标识套装.pdf"
+QR_DIR = ROOT / "artifacts" / "qr" / "png"
+PDF_PATH = ROOT / "artifacts" / "qr" / "513base-二维码标识套装.pdf"
 QR_DIR.mkdir(parents=True, exist_ok=True)
 PDF_PATH.parent.mkdir(parents=True, exist_ok=True)
 

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import LogoLoader from './components/LogoLoader';
-import './App.css';
+import LogoLoader from './LogoLoader';
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);

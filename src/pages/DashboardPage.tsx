@@ -18,9 +18,9 @@ import {
   UsersRound,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "./auth/AuthProvider";
-import type { UserRole } from "./types";
-import LegalFooter from "./components/LegalFooter";
+import { useAuth } from "../auth/AuthProvider";
+import type { UserRole } from "../types";
+import LegalFooter from "../components/LegalFooter";
 
 type DashboardView = "inventory" | "requests" | "departments" | "users" | "borrows" | "activities" | "announcements";
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-deploy_target=${DEPLOY_TARGET:-ubuntu@101.43.62.12}
-deploy_key=${DEPLOY_KEY:-$HOME/.ssh/password_lzm123.pem}
+deploy_target=${DEPLOY_TARGET:?Set DEPLOY_TARGET to the SSH user and host}
+deploy_key=${DEPLOY_KEY:?Set DEPLOY_KEY to the SSH private-key path}
+[[ -r "$deploy_key" ]] || { echo "SSH key is not readable: $deploy_key" >&2; exit 1; }
 project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 release_id=$(TZ=Asia/Shanghai date +%Y%m%d-%H%M%S)
 temp_dir=$(mktemp -d)
