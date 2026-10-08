@@ -235,6 +235,13 @@ Dashboard 是 `/` 首页，库存与业务管理台位于 `/app/*`，进入后�
 - `npm run test:auth-storage` 覆盖登录会话迁移、旧会话读取、登出清理、上传超时和请求取消；Playwright 手机视口压缩验证：1.07 MB 输入处理为约 0.20 MB WebP，最大边 1920 px。`npm run check` 通过。
 - 微信若隔离或清除站点存储，仍无法保证跨次扫码记住登录状态；必要时通过微信菜单在系统浏览器打开。真实手机相机、相册和网络上传尚需目标设备补验；本轮未提交、推送或重新部署，生产行为尚未变化。
 
+### 2026-10-08 修复版重新发布
+
+- 源码提交：`ee89008 fix: improve mobile uploads and remembered login`。
+- 云端 release：`20261008-151012`，已原子切换到 `/www/513base/releases/20261008-151012`。
+- 发布入口：`https://lzmyselfai.cn/513base/`；登录页和管理台路由返回 200，Nginx 配置检查通过。
+- 本次发布包含移动端图片压缩/上传超时提示、Storage 上传失败清理，以及“保持登录”会话存储修复。
+
 ## 云端迁移、账号与后续事项
 
 以下迁移已在远程 Supabase 项目执行并通过 `verify_setup.sql`：
