@@ -25,6 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [profileRevision, setProfileRevision] = useState(0);
   const [loadedAuthId, setLoadedAuthId] = useState<string | null>(null);
+  const authUserId = session?.user.id ?? null;
 
   useEffect(() => {
     if (!supabase) {
@@ -48,9 +49,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
       setAuthLoading(false);
+      if (event === "USER_UPDATED") setProfileRevision((revision) => revision + 1);
     });
 
     return () => {
@@ -59,8 +61,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Camera return and token refresh can emit SIGNED_IN for the same user.
+  // Keep profile loading tied to identity so active forms stay mounted.
   useEffect(() => {
-    if (!supabase || !session) {
+    if (!supabase || !authUserId) {
       setProfile(null);
       setProfileError(null);
       setProfileLoading(false);
@@ -76,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase
       .from("users")
       .select("id, student_id, name, department_id, phone, email, position, notes, role, is_active, must_change_password")
-      .eq("auth_user_id", session.user.id)
+      .eq("auth_user_id", authUserId)
       .maybeSingle()
       .then(({ data, error }) => {
         if (!active) return;
@@ -99,20 +103,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             isActive: data.is_active,
           });
         }
-        setLoadedAuthId(session.user.id);
+        setLoadedAuthId(authUserId);
         setProfileLoading(false);
       }, () => {
         if (!active) return;
         setProfile(null);
         setProfileError("无法读取账户资料，请稍后重试。");
-        setLoadedAuthId(session.user.id);
+        setLoadedAuthId(authUserId);
         setProfileLoading(false);
       });
 
     return () => {
       active = false;
     };
-  }, [session, profileRevision]);
+  }, [authUserId, profileRevision]);
 
   const loading = authLoading || (Boolean(session) && (profileLoading || loadedAuthId !== session?.user.id));
 

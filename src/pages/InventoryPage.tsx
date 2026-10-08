@@ -43,6 +43,7 @@ import LegalFooter from "../components/LegalFooter";
 import AccountImport from "../components/AccountImport";
 import { assetUrl } from "../lib/assetUrl";
 import { prepareInventoryImage } from "../lib/imageUpload";
+import { clearInventoryCreateDraft, inventoryDraftFromForm, readInventoryCreateDraft, writeInventoryCreateDraft } from "../lib/inventoryDraft";
 import type {
   Activity,
   ActivityStatus,
@@ -510,7 +511,8 @@ function App() {
   });
   const [selection, setSelection] = useState<Selection>("ALL");
   const [query, setQuery] = useState("");
-  const [editor, setEditor] = useState<{ mode: EditorMode; item?: InventoryItem } | null>(null);
+  const [createDraft, setCreateDraft] = useState(() => readInventoryCreateDraft(session?.user.id ?? null));
+  const [editor, setEditor] = useState<{ mode: EditorMode; item?: InventoryItem } | null>(() => createDraft ? { mode: "create" } : null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [departmentEditor, setDepartmentEditor] = useState<{ mode: EditorMode; department?: Department } | null>(null);
@@ -539,6 +541,21 @@ function App() {
   const [returnReviewRequestId, setReturnReviewRequestId] = useState<number | null>(null);
   const [returnReviewNote, setReturnReviewNote] = useState("");
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const inventoryFormRef = useRef<HTMLFormElement>(null);
+  const authUserId = session?.user.id ?? null;
+
+  const saveCreateDraft = useCallback(() => {
+    if (editor?.mode !== "create" || !inventoryFormRef.current) return;
+    writeInventoryCreateDraft(authUserId, inventoryDraftFromForm(new FormData(inventoryFormRef.current)));
+  }, [authUserId, editor?.mode]);
+
+  const closeInventoryEditor = () => {
+    if (editor?.mode === "create") {
+      clearInventoryCreateDraft(authUserId);
+      setCreateDraft(null);
+    }
+    setEditor(null);
+  };
 
   const loadData = useCallback(async () => {
     if (!client || !profile) return;
@@ -617,6 +634,17 @@ function App() {
   useEffect(() => {
     setSelectedImage(null);
   }, [editor?.mode, editor?.item?.id]);
+
+  useEffect(() => {
+    if (editor?.mode !== "create") return;
+    saveCreateDraft();
+    window.addEventListener("pagehide", saveCreateDraft);
+    document.addEventListener("visibilitychange", saveCreateDraft);
+    return () => {
+      window.removeEventListener("pagehide", saveCreateDraft);
+      document.removeEventListener("visibilitychange", saveCreateDraft);
+    };
+  }, [editor?.mode, saveCreateDraft]);
 
   useEffect(() => {
     if (!mobileNavOpen || !window.matchMedia("(max-width: 900px)").matches) return;
@@ -804,10 +832,7 @@ function App() {
 
   const handleImageSelection = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0] ?? null;
-    if (!file) {
-      setSelectedImage(null);
-      return;
-    }
+    if (!file) return;
     const validationError = validateImageFile(file);
     if (validationError) {
       event.currentTarget.value = "";
@@ -917,7 +942,7 @@ function App() {
     }
 
     if (succeeded) {
-      setEditor(null);
+      closeInventoryEditor();
       await loadData();
     }
   };
@@ -1667,23 +1692,23 @@ function App() {
       <LegalFooter />
 
       {editor && (
-        <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setEditor(null)}>
+        <div className="modal-layer" role="presentation">
           <section className="modal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
-            <header><div><p className="eyebrow">{isSuperAdmin ? "正式库存" : "变更申请"}</p><h2 id="editor-title">{editor.mode === "create" ? "申请新增物品" : (isSuperAdmin ? "编辑物品" : "申请修改物品")}</h2></div><button className="icon-button" onClick={() => setEditor(null)} aria-label="关闭"><X size={20} /></button></header>
-            <form onSubmit={handleSubmit}>
+            <header><div><p className="eyebrow">{isSuperAdmin ? "正式库存" : "变更申请"}</p><h2 id="editor-title">{editor.mode === "create" ? "申请新增物品" : (isSuperAdmin ? "编辑物品" : "申请修改物品")}</h2></div><button className="icon-button" onClick={closeInventoryEditor} disabled={submitting} aria-label="关闭"><X size={20} /></button></header>
+            <form ref={inventoryFormRef} onChange={saveCreateDraft} onSubmit={handleSubmit}>
               {editor.mode === "edit" && <label><span>唯一编号</span><input value={editor.item?.id} disabled /><small>编号由数据库永久分配，不能修改或复用</small></label>}
               {editor.mode === "create" && <div className="info-notice"><CircleAlert size={16} /><span>物品编号将由系统自动生成（如 ITEM0093），无需手动填写</span></div>}
-              <label><span>物品名称</span><input name="name" defaultValue={editor.item?.name ?? ""} autoFocus required maxLength={80} /></label>
-              <label><span>规格</span><input name="specification" defaultValue={editor.item?.specification ?? ""} maxLength={100} placeholder="尺寸、型号或包装规格" /></label>
-              <label><span>数量</span><input name="quantity" defaultValue={editor.item?.quantity ?? "若干"} maxLength={30} /></label>
-              <label><span>存放位置</span><LocationSelect defaultValue={editor.item?.locationCode ?? defaultCreateLocation(selection)} /></label>
-              <label><span>物品图片</span><input ref={imageInputRef} type="file" name="imageFile" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={handleImageSelection} /><small>支持拍照或从相册选择，格式为 JPEG、PNG、WebP、HEIC 或 HEIF，最大 10 MB；大图片会自动压缩</small></label>
+              <label><span>物品名称</span><input name="name" defaultValue={editor.item?.name ?? createDraft?.name ?? ""} autoFocus required maxLength={80} /></label>
+              <label><span>规格</span><input name="specification" defaultValue={editor.item?.specification ?? createDraft?.specification ?? ""} maxLength={100} placeholder="尺寸、型号或包装规格" /></label>
+              <label><span>数量</span><input name="quantity" defaultValue={editor.item?.quantity ?? createDraft?.quantity ?? "若干"} maxLength={30} /></label>
+              <label><span>存放位置</span><LocationSelect defaultValue={editor.item?.locationCode ?? createDraft?.locationCode ?? defaultCreateLocation(selection)} /></label>
+              <label><span>物品图片</span><input ref={imageInputRef} type="file" name="imageFile" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onClick={saveCreateDraft} onChange={handleImageSelection} /><small>支持拍照或从相册选择，格式为 JPEG、PNG、WebP、HEIC 或 HEIF，最大 10 MB；大图片会自动压缩</small></label>
               {(imagePreviewUrl || (editor.mode === "edit" && editor.item?.imagePath)) && <div className="image-upload-preview"><img src={imagePreviewUrl ?? editor.item?.imagePath} alt="待上传的物品预览" /><div><strong>{selectedImage ? "新图片已选择" : "当前图片"}</strong>{selectedImage && <small>{selectedImage.name} · {(selectedImage.size / 1024 / 1024).toFixed(1)} MB</small>}{selectedImage && <button type="button" className="secondary-button compact-button" onClick={clearSelectedImage}><X size={14} />移除</button>}</div></div>}
               {imageUploadStatus && <p className="image-upload-status" role="status" aria-live="polite">{imageUploadStatus}</p>}
               {editor.mode === "edit" && <><label><span>图片文件名</span><input name="imageName" defaultValue={editor.item?.imageName ?? ""} maxLength={180} /></label><label><span>图片路径</span><input name="imagePath" defaultValue={editor.item?.imagePath ?? ""} maxLength={300} /></label></>}
-              <label><span>识别状态</span><input name="recognitionStatus" defaultValue={editor.item?.recognitionStatus ?? "已确认"} maxLength={80} /></label>
-              {(!isSuperAdmin || editor.mode === "create") && <label><span>申请说明</span><textarea name="reason" rows={3} maxLength={300} placeholder="说明新增或修改原因" required /></label>}
-              <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setEditor(null)}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "提交中..." : isSuperAdmin && editor.mode === "edit" ? "写入正式库存" : <><Send size={16} />提交审批</>}</button></div>
+              <label><span>识别状态</span><input name="recognitionStatus" defaultValue={editor.item?.recognitionStatus ?? createDraft?.recognitionStatus ?? "已确认"} maxLength={80} /></label>
+              {(!isSuperAdmin || editor.mode === "create") && <label><span>申请说明</span><textarea name="reason" defaultValue={editor.mode === "create" ? createDraft?.reason ?? "" : ""} rows={3} maxLength={300} placeholder="说明新增或修改原因" required /></label>}
+              <div className="form-actions"><button type="button" className="secondary-button" onClick={closeInventoryEditor} disabled={submitting}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "提交中..." : isSuperAdmin && editor.mode === "edit" ? "写入正式库存" : <><Send size={16} />提交审批</>}</button></div>
             </form>
           </section>
         </div>
