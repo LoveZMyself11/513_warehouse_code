@@ -172,6 +172,8 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 }
 .page-notice { color: var(--green-dark); border-color: #acd0c0; background: var(--green-soft); }
 .page-error { color: #8b332c; border-color: #e8c2bd; background: var(--red-soft); }
+.modal form > .page-error > svg { flex-shrink: 0; }
+.modal form > .page-error > span { min-width: 0; overflow-wrap: anywhere; }
 .page-notice > button, .page-error > button {
   width: 28px;
   height: 28px;

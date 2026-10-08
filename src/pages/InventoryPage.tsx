@@ -43,6 +43,7 @@ import LegalFooter from "../components/LegalFooter";
 import AccountImport from "../components/AccountImport";
 import { assetUrl } from "../lib/assetUrl";
 import { prepareInventoryImage } from "../lib/imageUpload";
+import { IMAGE_EXTENSIONS, storageFileName } from "../lib/storageFileName";
 import { clearInventoryCreateDraft, inventoryDraftFromForm, readInventoryCreateDraft, writeInventoryCreateDraft } from "../lib/inventoryDraft";
 import type {
   Activity,
@@ -231,13 +232,6 @@ const isShelf = (selection: string) => /^[A-D]$/.test(selection);
 const IMAGE_BUCKET = "inventory-images";
 const RETURN_IMAGE_BUCKET = "borrow-return-images";
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
-const IMAGE_EXTENSIONS: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "image/heic": "heic",
-  "image/heif": "heif",
-};
 
 const validateImageFile = (file: File) => {
   if (!Object.hasOwn(IMAGE_EXTENSIONS, file.type)) {
@@ -245,16 +239,6 @@ const validateImageFile = (file: File) => {
   }
   if (file.size > MAX_IMAGE_SIZE) return "图片不能超过 10 MB。";
   return null;
-};
-
-const storageFileName = (itemName: string, file: File) => {
-  const safeName = itemName
-    .normalize("NFKC")
-    .replace(/[^\p{L}\p{N}]+/gu, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 48) || "item";
-  const suffix = crypto.randomUUID().slice(0, 8);
-  return `${safeName}_${Date.now()}_${suffix}.${IMAGE_EXTENSIONS[file.type]}`;
 };
 
 const formatDateTime = (value: string | null | undefined) => {
@@ -529,6 +513,7 @@ function App() {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [imageUploadStatus, setImageUploadStatus] = useState("");
+  const [editorError, setEditorError] = useState<string | null>(null);
   const [returnEditorOrderId, setReturnEditorOrderId] = useState<number | null>(null);
   const [returnPhotoFiles, setReturnPhotoFiles] = useState<Record<number, File | null>>({});
   const [returnLocationChecks, setReturnLocationChecks] = useState<Record<number, boolean>>({});
@@ -550,6 +535,7 @@ function App() {
   }, [authUserId, editor?.mode]);
 
   const closeInventoryEditor = () => {
+    setEditorError(null);
     if (editor?.mode === "create") {
       clearInventoryCreateDraft(authUserId);
       setCreateDraft(null);
@@ -633,6 +619,7 @@ function App() {
 
   useEffect(() => {
     setSelectedImage(null);
+    setEditorError(null);
   }, [editor?.mode, editor?.item?.id]);
 
   useEffect(() => {
@@ -838,9 +825,11 @@ function App() {
       event.currentTarget.value = "";
       setSelectedImage(null);
       setError(validationError);
+      setEditorError(validationError);
       return;
     }
     setError(null);
+    setEditorError(null);
     setSelectedImage(file);
   };
 
@@ -863,16 +852,25 @@ function App() {
     const reason = String(form.get("reason") ?? "").trim();
     if (!name) return;
 
+    if (profile.role === "member" && profile.departmentId === null) {
+      const message = "账号尚未分配部门，无法确定审批管理员。请联系超级管理员设置部门后重新登录。";
+      setError(message);
+      setEditorError(message);
+      return;
+    }
+
     if (selectedImage) {
       const validationError = validateImageFile(selectedImage);
       if (validationError) {
         setError(validationError);
+        setEditorError(validationError);
         return;
       }
     }
 
     setSubmitting(true);
     setError(null);
+    setEditorError(null);
     setNotice(null);
     setImageUploadStatus("");
     let uploadedFilePath: string | null = null;
@@ -882,12 +880,12 @@ function App() {
         if (!session?.user.id) throw new Error("登录状态已失效，请重新登录后上传。");
         setImageUploadStatus("正在优化图片，请稍候...");
         const uploadFile = await prepareInventoryImage(selectedImage);
-        const fileName = storageFileName(name, uploadFile);
-        uploadedFilePath = `inventory/${session.user.id}/${fileName}`;
+        const fileName = storageFileName(uploadFile);
+        const storagePath = `inventory/${session.user.id}/${fileName}`;
         setImageUploadStatus(`正在上传图片（${(uploadFile.size / 1024 / 1024).toFixed(1)} MB）...`);
         const { error: uploadError } = await client.storage
           .from(IMAGE_BUCKET)
-          .upload(uploadedFilePath, uploadFile, {
+          .upload(storagePath, uploadFile, {
             cacheControl: "3600",
             contentType: uploadFile.type,
             upsert: false,
@@ -896,12 +894,13 @@ function App() {
         if (uploadError) {
           throw new Error(inventoryUploadErrorMessage(uploadError));
         }
-        setImageUploadStatus("");
+        uploadedFilePath = storagePath;
         const { data: urlData } = client.storage.from(IMAGE_BUCKET).getPublicUrl(uploadedFilePath);
         imageName = fileName;
         imagePath = urlData.publicUrl;
       }
 
+      setImageUploadStatus(editor.mode === "create" ? "正在提交新增申请..." : "正在保存物品变更...");
       if (isSuperAdmin && editor.mode === "edit") {
         const result = await client.rpc("update_inventory_item", {
               p_item_id: editor.item!.id, p_name: name, p_location_code: locationCode, p_quantity: quantity,
@@ -930,12 +929,19 @@ function App() {
         setNotice("变更请求已提交，批准前不会影响正式库存。");
       }
     } catch (submitError) {
+      setEditorError(errorMessage(submitError));
       let cleanupFailed = false;
       if (uploadedFilePath) {
-        const { error: cleanupError } = await client.storage.from(IMAGE_BUCKET).remove([uploadedFilePath]);
-        cleanupFailed = Boolean(cleanupError);
+        try {
+          const { error: cleanupError } = await client.storage.from(IMAGE_BUCKET).remove([uploadedFilePath]);
+          cleanupFailed = Boolean(cleanupError);
+        } catch {
+          cleanupFailed = true;
+        }
       }
-      setError(`${errorMessage(submitError)}${cleanupFailed ? " 已上传的临时图片未能自动清理，请联系管理员。" : ""}`);
+      const message = `${errorMessage(submitError)}${cleanupFailed ? " 已上传的临时图片未能自动清理，请联系管理员。" : ""}`;
+      setError(message);
+      setEditorError(message);
     } finally {
       setImageUploadStatus("");
       setSubmitting(false);
@@ -1153,7 +1159,7 @@ function App() {
         const photo = returnPhotoFiles[line.id];
         let path: string | null = null;
         if (photo) {
-          const fileName = storageFileName(line.item_id, photo);
+          const fileName = storageFileName(photo);
           path = `returns/${session.user.id}/${returnEditorOrder.id}/${line.id}_${fileName}`;
           const { error: uploadError } = await client.storage.from(RETURN_IMAGE_BUCKET).upload(path, photo, {
             cacheControl: "3600",
@@ -1708,6 +1714,7 @@ function App() {
               {editor.mode === "edit" && <><label><span>图片文件名</span><input name="imageName" defaultValue={editor.item?.imageName ?? ""} maxLength={180} /></label><label><span>图片路径</span><input name="imagePath" defaultValue={editor.item?.imagePath ?? ""} maxLength={300} /></label></>}
               <label><span>识别状态</span><input name="recognitionStatus" defaultValue={editor.item?.recognitionStatus ?? createDraft?.recognitionStatus ?? "已确认"} maxLength={80} /></label>
               {(!isSuperAdmin || editor.mode === "create") && <label><span>申请说明</span><textarea name="reason" defaultValue={editor.mode === "create" ? createDraft?.reason ?? "" : ""} rows={3} maxLength={300} placeholder="说明新增或修改原因" required /></label>}
+              {editorError && <div className="page-error" role="alert"><CircleAlert size={17} /><span>{editorError}</span></div>}
               <div className="form-actions"><button type="button" className="secondary-button" onClick={closeInventoryEditor} disabled={submitting}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "提交中..." : isSuperAdmin && editor.mode === "edit" ? "写入正式库存" : <><Send size={16} />提交审批</>}</button></div>
             </form>
           </section>
