@@ -4,6 +4,7 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
 import { accountFunctionError } from "./accountApi";
 import LegalFooter from "../components/LegalFooter";
+import { authSessionStorage } from "../lib/authStorage";
 
 interface LoginLocationState {
   from?: string;
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const { client, configured, loading, session } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberLogin, setRememberLogin] = useState(() => authSessionStorage.getRememberLogin());
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
   const navigate = useNavigate();
@@ -75,14 +77,29 @@ export default function LoginPage() {
             缺少 Supabase 发布密钥。请按 <code>.env.example</code> 配置环境变量后重启应用。
           </div>
         ) : (
-          <form className="auth-form" onSubmit={handleSubmit}>
+          <form className="auth-form" autoComplete="on" onSubmit={handleSubmit}>
             <label>
               <span>学号</span>
-              <div className="auth-input"><IdCard size={17} /><input type="text" autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="学号或原邮箱账号" maxLength={254} required /></div>
+              <div className="auth-input"><IdCard size={17} /><input id="login-username" name="username" type="text" autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="学号或原邮箱账号" maxLength={254} required /></div>
             </label>
             <label>
               <span>密码</span>
-              <div className="auth-input"><LockKeyhole size={17} /><input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></div>
+              <div className="auth-input"><LockKeyhole size={17} /><input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></div>
+            </label>
+
+            <label className="checkbox-label">
+              <input
+                id="remember-login"
+                name="rememberLogin"
+                type="checkbox"
+                checked={rememberLogin}
+                onChange={(event) => {
+                  const checked = event.target.checked;
+                  setRememberLogin(checked);
+                  authSessionStorage.setRememberLogin(checked);
+                }}
+              />
+              <span>保持登录</span>
             </label>
 
             {message && <div className={`auth-message ${message.type}`} role={message.type === "error" ? "alert" : "status"}>{message.text}</div>}

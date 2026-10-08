@@ -399,6 +399,7 @@ code { color: #385148; font-family: "SFMono-Regular", Consolas, monospace; font-
 .checkbox-label { flex-direction: row !important; align-items: center; gap: 9px !important; }
 .checkbox-label input { width: 16px; min-height: 16px; }
 .form-hint { color: #89928f; font-size: 11px; font-weight: 400; line-height: 1.5; }
+.image-upload-status { margin: 0; color: var(--green-dark); font-size: 12px; line-height: 1.5; }
 .info-notice { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; margin-bottom: 18px; background: #e0f0e9; border-radius: 6px; color: #176b50; font-size: 13px; line-height: 1.5; }
 .info-notice svg { flex-shrink: 0; margin-top: 2px; }
 .image-upload-preview { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); }

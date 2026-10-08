@@ -42,6 +42,7 @@ import DeveloperContact from "../components/DeveloperContact";
 import LegalFooter from "../components/LegalFooter";
 import AccountImport from "../components/AccountImport";
 import { assetUrl } from "../lib/assetUrl";
+import { prepareInventoryImage } from "../lib/imageUpload";
 import type {
   Activity,
   ActivityStatus,
@@ -272,6 +273,23 @@ const errorMessage = (error: unknown) => error instanceof Error
   : typeof error === "object" && error !== null && "message" in error
     ? String(error.message)
     : "操作失败，请稍后重试。";
+
+const inventoryUploadErrorMessage = (error: { message: string; statusCode?: string }) => {
+  const message = error.message.toLowerCase();
+  if (message.includes("bucket not found") || error.statusCode === "404") {
+    return "图片存储尚未配置，请管理员先在 Supabase SQL Editor 执行 supabase/storage_images.sql。";
+  }
+  if (message.includes("row-level security") || error.statusCode === "403") {
+    return "图片上传权限不足。请退出后重新登录；若仍失败，请管理员检查账号启用状态和 Storage 权限。";
+  }
+  if (message.includes("abort") || message.includes("timeout")) {
+    return "图片上传等待超时，请检查手机网络后重试。若通过微信访问，也可点右上角菜单后选择在系统浏览器打开。";
+  }
+  if (message.includes("fetch")) {
+    return "无法连接图片存储服务，请检查当前网络，或从微信菜单选择在系统浏览器打开后重试。";
+  }
+  return `图片上传失败：${error.message}`;
+};
 
 const matchesSelection = (item: InventoryItem, selection: Selection) => {
   if (selection === "ALL") return true;
@@ -508,6 +526,7 @@ function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imageUploadStatus, setImageUploadStatus] = useState("");
   const [returnEditorOrderId, setReturnEditorOrderId] = useState<number | null>(null);
   const [returnPhotoFiles, setReturnPhotoFiles] = useState<Record<number, File | null>>({});
   const [returnLocationChecks, setReturnLocationChecks] = useState<Record<number, boolean>>({});
@@ -830,29 +849,29 @@ function App() {
     setSubmitting(true);
     setError(null);
     setNotice(null);
+    setImageUploadStatus("");
     let uploadedFilePath: string | null = null;
     let succeeded = false;
     try {
       if (selectedImage) {
         if (!session?.user.id) throw new Error("登录状态已失效，请重新登录后上传。");
-        const fileName = storageFileName(name, selectedImage);
+        setImageUploadStatus("正在优化图片，请稍候...");
+        const uploadFile = await prepareInventoryImage(selectedImage);
+        const fileName = storageFileName(name, uploadFile);
         uploadedFilePath = `inventory/${session.user.id}/${fileName}`;
+        setImageUploadStatus(`正在上传图片（${(uploadFile.size / 1024 / 1024).toFixed(1)} MB）...`);
         const { error: uploadError } = await client.storage
           .from(IMAGE_BUCKET)
-          .upload(uploadedFilePath, selectedImage, {
+          .upload(uploadedFilePath, uploadFile, {
             cacheControl: "3600",
-            contentType: selectedImage.type,
+            contentType: uploadFile.type,
             upsert: false,
           });
 
         if (uploadError) {
-          const uploadMessage = uploadError.message.includes("Bucket not found")
-            ? "图片存储尚未配置，请管理员先在 Supabase SQL Editor 执行 supabase/storage_images.sql。"
-            : uploadError.message.includes("row-level security")
-              ? "当前账号没有图片上传权限，请检查 Storage RLS 策略和账号启用状态。"
-              : `图片上传失败：${uploadError.message}`;
-          throw new Error(uploadMessage);
+          throw new Error(inventoryUploadErrorMessage(uploadError));
         }
+        setImageUploadStatus("");
         const { data: urlData } = client.storage.from(IMAGE_BUCKET).getPublicUrl(uploadedFilePath);
         imageName = fileName;
         imagePath = urlData.publicUrl;
@@ -893,6 +912,7 @@ function App() {
       }
       setError(`${errorMessage(submitError)}${cleanupFailed ? " 已上传的临时图片未能自动清理，请联系管理员。" : ""}`);
     } finally {
+      setImageUploadStatus("");
       setSubmitting(false);
     }
 
@@ -1657,8 +1677,9 @@ function App() {
               <label><span>规格</span><input name="specification" defaultValue={editor.item?.specification ?? ""} maxLength={100} placeholder="尺寸、型号或包装规格" /></label>
               <label><span>数量</span><input name="quantity" defaultValue={editor.item?.quantity ?? "若干"} maxLength={30} /></label>
               <label><span>存放位置</span><LocationSelect defaultValue={editor.item?.locationCode ?? defaultCreateLocation(selection)} /></label>
-              <label><span>物品图片</span><input ref={imageInputRef} type="file" name="imageFile" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={handleImageSelection} /><small>支持拍照或从相册选择，格式为 JPEG、PNG、WebP、HEIC 或 HEIF，最大 10 MB</small></label>
+              <label><span>物品图片</span><input ref={imageInputRef} type="file" name="imageFile" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={handleImageSelection} /><small>支持拍照或从相册选择，格式为 JPEG、PNG、WebP、HEIC 或 HEIF，最大 10 MB；大图片会自动压缩</small></label>
               {(imagePreviewUrl || (editor.mode === "edit" && editor.item?.imagePath)) && <div className="image-upload-preview"><img src={imagePreviewUrl ?? editor.item?.imagePath} alt="待上传的物品预览" /><div><strong>{selectedImage ? "新图片已选择" : "当前图片"}</strong>{selectedImage && <small>{selectedImage.name} · {(selectedImage.size / 1024 / 1024).toFixed(1)} MB</small>}{selectedImage && <button type="button" className="secondary-button compact-button" onClick={clearSelectedImage}><X size={14} />移除</button>}</div></div>}
+              {imageUploadStatus && <p className="image-upload-status" role="status" aria-live="polite">{imageUploadStatus}</p>}
               {editor.mode === "edit" && <><label><span>图片文件名</span><input name="imageName" defaultValue={editor.item?.imageName ?? ""} maxLength={180} /></label><label><span>图片路径</span><input name="imagePath" defaultValue={editor.item?.imagePath ?? ""} maxLength={300} /></label></>}
               <label><span>识别状态</span><input name="recognitionStatus" defaultValue={editor.item?.recognitionStatus ?? "已确认"} maxLength={80} /></label>
               {(!isSuperAdmin || editor.mode === "create") && <label><span>申请说明</span><textarea name="reason" rows={3} maxLength={300} placeholder="说明新增或修改原因" required /></label>}

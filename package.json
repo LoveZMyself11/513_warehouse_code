@@ -1,10 +1,12 @@
 {
   "name": "513base-inventory",
   "private": true,
+  "type": "module",
   "version": "1.0.0",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
+    "test:auth-storage": "node --experimental-strip-types --test tests/*.test.mjs",
     "check": "npm run typecheck && npm run build",
     "build": "vite build && cp -R data dist/data",
     "preview": "vite preview --host 0.0.0.0"
