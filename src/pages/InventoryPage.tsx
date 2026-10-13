@@ -481,6 +481,7 @@ function App() {
   const [borrowOrders, setBorrowOrders] = useState<BorrowOrder[]>([]);
   const [borrowItems, setBorrowItems] = useState<DbBorrowItemRow[]>([]);
   const [borrowSummaries, setBorrowSummaries] = useState<DbBorrowSummaryRow[]>([]);
+  const [availability, setAvailability] = useState<Map<string, { total_quantity: number | null; reserved_quantity: number; available_quantity: number }>>(new Map());
   const [borrowReturnRequests, setBorrowReturnRequests] = useState<DbBorrowReturnRequestRow[]>([]);
   const [borrowReturnItems, setBorrowReturnItems] = useState<DbBorrowReturnItemRow[]>([]);
   const [returnPhotoUrls, setReturnPhotoUrls] = useState<Record<string, string>>({});
@@ -548,7 +549,7 @@ function App() {
     setLoading(true);
     setError(null);
 
-    const [itemsResult, historyResult, requestsResult, departmentsResult, activitiesResult, usersResult, ordersResult, orderItemsResult, borrowSummaryResult, returnRequestsResult, returnItemsResult, announcementsResult] = await Promise.all([
+    const [itemsResult, historyResult, requestsResult, departmentsResult, activitiesResult, usersResult, ordersResult, orderItemsResult, borrowSummaryResult, returnRequestsResult, returnItemsResult, announcementsResult, availabilityResult] = await Promise.all([
       client.from("inventory_items").select("*").order("id"),
       client.from("inventory_location_history").select("*").order("moved_at", { ascending: false }),
       client.from("inventory_change_requests").select("*").order("created_at", { ascending: false }),
@@ -561,6 +562,7 @@ function App() {
       client.from("borrow_return_requests").select("id, order_id, user_id, status, submitted_at, reviewed_by, reviewed_at, review_note, notes, submitted_by").order("submitted_at", { ascending: false }),
       client.from("borrow_return_items").select("id, return_request_id, borrow_item_id, item_id, original_location_code, returned_location_code, photo_path, item_condition, notes, created_at").order("id"),
       client.from("system_announcements").select("id, title, content, target_role, is_active, starts_at, ends_at, created_by, created_at, updated_at").order("created_at", { ascending: false }),
+      client.rpc("get_inventory_availability"),
     ]);
 
     const firstError = itemsResult.error ?? historyResult.error ?? requestsResult.error ?? departmentsResult.error
@@ -578,6 +580,7 @@ function App() {
       setBorrowOrders(((ordersResult.data ?? []) as DbBorrowOrderRow[]).map(mapBorrowOrder));
       setBorrowItems((orderItemsResult.data ?? []) as DbBorrowItemRow[]);
       setBorrowSummaries((borrowSummaryResult.data ?? []) as DbBorrowSummaryRow[]);
+      setAvailability(new Map((availabilityResult.data ?? []).map((row: { item_id: string; total_quantity: number | null; reserved_quantity: number; available_quantity: number }) => [row.item_id, row])));
       const returnSchemaReady = !returnRequestsResult.error && !returnItemsResult.error;
       setReturnFeatureReady(returnSchemaReady);
       const loadedReturnItems = (returnItemsResult.data ?? []) as DbBorrowReturnItemRow[];
@@ -594,7 +597,9 @@ function App() {
       } else {
         setReturnPhotoUrls({});
       }
-      if (activitiesResult.error) {
+      if (availabilityResult.error) {
+        setNotice("可借数量暂不可用，请先执行按数量借用迁移脚本，再刷新库存。");
+      } else if (activitiesResult.error) {
         setNotice("库存已加载；活动、批量借用和借出详情需要先执行新的 Supabase 迁移脚本。");
       } else if (!returnSchemaReady) {
         setNotice("借用状态已加载；归还申请功能需要先执行新的归还迁移脚本。");
@@ -710,10 +715,10 @@ function App() {
   );
   const activeActivities = useMemo(() => activities.filter((activity) => activity.status === "active"), [activities]);
   const selectedItems = useMemo(
-    () => items.filter((item) => selectedItemIds.has(item.id) && !borrowSummaryByItem.has(item.id) && isPhysicalLocation(item.locationCode)),
-    [borrowSummaryByItem, items, selectedItemIds],
+    () => items.filter((item) => selectedItemIds.has(item.id) && (availability.get(item.id)?.available_quantity ?? 0) > 0 && isPhysicalLocation(item.locationCode)),
+    [availability, items, selectedItemIds],
   );
-  const availableVisibleItems = visibleItems.filter((item) => !borrowSummaryByItem.has(item.id) && isPhysicalLocation(item.locationCode));
+  const availableVisibleItems = visibleItems.filter((item) => (availability.get(item.id)?.available_quantity ?? 0) > 0 && isPhysicalLocation(item.locationCode));
   const selectedVisibleCount = availableVisibleItems.filter((item) => selectedItemIds.has(item.id)).length;
 
   const pendingLocationCount = items.filter((item) => isPendingLocation(item.locationCode)).length;
@@ -767,11 +772,9 @@ function App() {
   const canManageActivity = (activity: Activity) =>
     isSuperAdmin || (isAdmin && profile?.departmentId !== null && activity.departmentId === profile?.departmentId);
 
-  const borrowSummary = (itemId: string) => borrowSummaryByItem.get(itemId) ?? null;
-
   const toggleItemSelection = (itemId: string) => {
     const item = items.find((candidate) => candidate.id === itemId);
-    if (!item || borrowSummaryByItem.has(itemId) || !isPhysicalLocation(item.locationCode)) return;
+    if (!item || (availability.get(itemId)?.available_quantity ?? 0) <= 0 || !isPhysicalLocation(item.locationCode)) return;
     setSelectedItemIds((current) => {
       const next = new Set(current);
       if (next.has(itemId)) next.delete(itemId);
@@ -1053,8 +1056,13 @@ function App() {
     const form = new FormData(event.currentTarget);
     const requestItems = selectedItems.map((item) => ({
       item_id: item.id,
-      quantity: Math.max(1, Number(form.get(`quantity_${item.id}`) ?? 1) || 1),
+      quantity: Number(form.get(`quantity_${item.id}`)),
     }));
+    if (requestItems.some((line) => !Number.isInteger(line.quantity) || line.quantity < 1
+      || line.quantity > (availability.get(line.item_id)?.available_quantity ?? 0))) {
+      setError("申请数量必须为正整数，且不能超过当前可借数量。请刷新库存后重试。");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     setNotice(null);
@@ -1586,11 +1594,11 @@ function App() {
                   <thead><tr><th className="selection-column"><span className="sr-only">选择</span></th><th>物品</th><th>唯一编号</th><th>当前位置</th><th>规格 / 数量</th><th>状态</th><th><span className="sr-only">操作</span></th></tr></thead>
                   <tbody>{visibleItems.map((item) => { const meta = statusMeta(item); return (
                     <tr key={item.id} onClick={() => setDetailId(item.id)}>
-                      <td className="selection-cell" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedItemIds.has(item.id)} disabled={borrowSummaryByItem.has(item.id) || !isPhysicalLocation(item.locationCode)} onChange={() => toggleItemSelection(item.id)} aria-label={`选择 ${item.name}`} title={!isPhysicalLocation(item.locationCode) ? "确认具体层位后可借用" : undefined} /></td>
+                      <td className="selection-cell" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedItemIds.has(item.id)} disabled={(availability.get(item.id)?.available_quantity ?? 0) <= 0 || !isPhysicalLocation(item.locationCode)} onChange={() => toggleItemSelection(item.id)} aria-label={`选择 ${item.name}`} title={!isPhysicalLocation(item.locationCode) ? "确认具体层位后可借用" : undefined} /></td>
                       <td><div className="item-cell">{item.imagePath ? <img src={item.imagePath} alt="" /> : <div className="image-placeholder"><Box size={20} /></div>}<div><strong>{item.name}</strong><small>{item.imageName || item.recognitionStatus}</small></div></div></td>
                       <td><code>{item.id}</code></td>
                       <td><span className={`location-pill ${isPendingLocation(item.locationCode) ? "pending" : ""}`}><MapPin size={14} />{locationLabel(item.locationCode)}</span></td>
-                      <td><div className="spec-cell"><span>{item.specification || "未填写规格"}</span><strong>{item.quantity}</strong></div></td>
+                      <td><div className="spec-cell"><span>{item.specification || "未填写规格"}</span><strong>{item.quantity}</strong><small>{availability.has(item.id) ? `可借 ${availability.get(item.id)!.available_quantity} · 占用 ${availability.get(item.id)!.reserved_quantity}${availability.get(item.id)!.total_quantity === null ? " · 整项" : ""}` : "可借数量暂不可用"}</small></div></td>
                       <td><div className="status-stack"><span className={`status-badge ${meta.className}`}>{meta.text}</span>{borrowSummaryByItem.has(item.id) && <span className="status-badge borrowed">已借出</span>}{!isPhysicalLocation(item.locationCode) && <span className="status-badge pending">待确认层位 · 暂不可借</span>}</div></td>
                       <td className="action-cell">{profile?.role !== "member" && <button className="icon-button" onClick={(event) => { event.stopPropagation(); setEditor({ mode: "edit", item }); }} aria-label={`${isSuperAdmin ? "编辑" : "申请修改"} ${item.name}`} title={isSuperAdmin ? "编辑" : "申请修改"}><Edit3 size={17} /></button>}<button className="icon-button more" onClick={(event) => { event.stopPropagation(); setDetailId(item.id); }} aria-label={`查看 ${item.name}`} title="查看详情"><MoreHorizontal size={18} /></button></td>
                     </tr>
@@ -1706,7 +1714,7 @@ function App() {
               {editor.mode === "create" && <div className="info-notice"><CircleAlert size={16} /><span>物品编号将由系统自动生成（如 ITEM0093），无需手动填写</span></div>}
               <label><span>物品名称</span><input name="name" defaultValue={editor.item?.name ?? createDraft?.name ?? ""} autoFocus required maxLength={80} /></label>
               <label><span>规格</span><input name="specification" defaultValue={editor.item?.specification ?? createDraft?.specification ?? ""} maxLength={100} placeholder="尺寸、型号或包装规格" /></label>
-              <label><span>数量</span><input name="quantity" defaultValue={editor.item?.quantity ?? createDraft?.quantity ?? "若干"} maxLength={30} /></label>
+              <label><span>库存总数量</span><input name="quantity" defaultValue={editor.item?.quantity ?? createDraft?.quantity ?? "若干"} maxLength={30} /><small>按数量管理填写整数；单位填写在规格中。“若干”等文字按整项借用。</small></label>
               <label><span>存放位置</span><LocationSelect defaultValue={editor.item?.locationCode ?? createDraft?.locationCode ?? defaultCreateLocation(selection)} /></label>
               <label><span>物品图片</span><input ref={imageInputRef} type="file" name="imageFile" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onClick={saveCreateDraft} onChange={handleImageSelection} /><small>支持拍照或从相册选择，格式为 JPEG、PNG、WebP、HEIC 或 HEIF，最大 10 MB；大图片会自动压缩</small></label>
               {(imagePreviewUrl || (editor.mode === "edit" && editor.item?.imagePath)) && <div className="image-upload-preview"><img src={imagePreviewUrl ?? editor.item?.imagePath} alt="待上传的物品预览" /><div><strong>{selectedImage ? "新图片已选择" : "当前图片"}</strong>{selectedImage && <small>{selectedImage.name} · {(selectedImage.size / 1024 / 1024).toFixed(1)} MB</small>}{selectedImage && <button type="button" className="secondary-button compact-button" onClick={clearSelectedImage}><X size={14} />移除</button>}</div></div>}
@@ -1795,8 +1803,8 @@ function App() {
           <section className="modal borrow-modal" role="dialog" aria-modal="true" aria-labelledby="borrow-editor-title">
             <header><div><p className="eyebrow">库存借用</p><h2 id="borrow-editor-title">填写借用单</h2></div><button className="icon-button" onClick={() => setBorrowEditorOpen(false)} aria-label="关闭"><X size={20} /></button></header>
             <form onSubmit={handleBorrowSubmit}>
-              <div className="borrow-selection-heading"><div><strong>本次借用物品</strong><span>共 {selectedItems.length} 件</span></div><button type="button" className="secondary-button compact-button" onClick={() => { setBorrowEditorOpen(false); setView("inventory"); }}><ListChecks size={14} />继续选择</button></div>
-              <div className="borrow-selection-list">{selectedItems.map((item) => <div key={item.id} className="borrow-selection-row"><div><strong>{item.name}</strong><small>{item.id} · {locationLabel(item.locationCode)}</small></div><label><span>数量</span><input name={`quantity_${item.id}`} type="number" min={1} defaultValue={1} required /></label><button type="button" className="icon-button" onClick={() => toggleItemSelection(item.id)} aria-label={`移除 ${item.name}`} title="移除"><X size={16} /></button></div>)}</div>
+              <div className="borrow-selection-heading"><div><strong>本次借用物品</strong><span>共 {selectedItems.length} 种</span></div><button type="button" className="secondary-button compact-button" onClick={() => { setBorrowEditorOpen(false); setView("inventory"); }}><ListChecks size={14} />继续选择</button></div>
+              <div className="borrow-selection-list">{selectedItems.map((item) => <div key={item.id} className="borrow-selection-row"><div><strong>{item.name}</strong><small>{item.id} · {locationLabel(item.locationCode)}</small></div><label><span>数量（可借 {availability.get(item.id)?.available_quantity ?? 0}）</span><input name={`quantity_${item.id}`} type="number" min={1} max={availability.get(item.id)?.available_quantity ?? 0} step={1} defaultValue={1} required /></label><button type="button" className="icon-button" onClick={() => toggleItemSelection(item.id)} aria-label={`移除 ${item.name}`} title="移除"><X size={16} /></button></div>)}</div>
               <label><span>所属活动</span><select name="activityId" defaultValue=""><option value="">不关联活动</option>{activeActivities.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}{activity.departmentId ? ` · ${departmentName(activity.departmentId)}` : ""}</option>)}</select></label>
               <label><span>预计归还日期</span><input name="expectedReturnDate" type="date" min={new Date().toISOString().slice(0, 10)} required /></label>
               <label><span>借用理由</span><textarea name="reason" rows={3} required maxLength={300} placeholder="填写活动或工作用途" /></label>
@@ -1865,7 +1873,7 @@ function App() {
             <header><div><p className="eyebrow">正式库存</p><h2>{selectedDetail.name}</h2></div><button className="icon-button" onClick={() => setDetailId(null)} aria-label="关闭"><X size={20} /></button></header>
             {selectedDetail.imagePath ? <img className="detail-image" src={selectedDetail.imagePath} alt={selectedDetail.name} /> : <div className="detail-image placeholder"><Box size={38} /></div>}
             <dl className="detail-list"><div><dt>唯一编号</dt><dd><code>{selectedDetail.id}</code></dd></div><div><dt>存放位置</dt><dd>{locationLabel(selectedDetail.locationCode)}</dd></div><div><dt>规格</dt><dd>{selectedDetail.specification || "未填写"}</dd></div><div><dt>数量</dt><dd>{selectedDetail.quantity}</dd></div><div><dt>图片文件名</dt><dd>{selectedDetail.imageName || "未填写"}</dd></div><div><dt>识别状态</dt><dd>{selectedDetail.recognitionStatus}</dd></div></dl>
-            {borrowSummary(selectedDetail.id) && <section className="borrow-detail"><h3><PackageCheck size={17} />当前借出信息</h3><dl><div><dt>借用人</dt><dd>{borrowSummary(selectedDetail.id)?.borrower_name}</dd></div><div><dt>所属部门</dt><dd>{borrowSummary(selectedDetail.id)?.department_name || "未分配"}</dd></div><div><dt>借出时间</dt><dd>{new Date(borrowSummary(selectedDetail.id)!.borrowed_at).toLocaleString("zh-CN")}</dd></div><div><dt>预计归还</dt><dd>{borrowSummary(selectedDetail.id)?.expected_return_date || "未填写"}</dd></div><div><dt>所属活动</dt><dd>{borrowSummary(selectedDetail.id)?.activity_name || "未关联活动"}</dd></div><div><dt>借用单号</dt><dd>{borrowSummary(selectedDetail.id)?.order_number}</dd></div></dl></section>}
+            {borrowSummaries.filter((summary) => summary.item_id === selectedDetail.id).map((summary) => <section key={summary.order_id} className="borrow-detail"><h3><PackageCheck size={17} />当前借出信息</h3><dl><div><dt>借用人</dt><dd>{summary.borrower_name}</dd></div><div><dt>所属部门</dt><dd>{summary.department_name || "未分配"}</dd></div><div><dt>借出时间</dt><dd>{new Date(summary.borrowed_at).toLocaleString("zh-CN")}</dd></div><div><dt>预计归还</dt><dd>{summary.expected_return_date || "未填写"}</dd></div><div><dt>所属活动</dt><dd>{summary.activity_name || "未关联活动"}</dd></div><div><dt>借用单号</dt><dd>{summary.order_number}</dd></div></dl></section>)}
             {profile?.role !== "member" && <div className="drawer-actions"><button className="primary-button" onClick={() => { setEditor({ mode: "edit", item: selectedDetail }); setDetailId(null); }}><Edit3 size={17} />{isSuperAdmin ? "编辑" : "申请修改"}</button><button className="danger-button" onClick={() => setDeleteId(selectedDetail.id)}><Trash2 size={17} />{isSuperAdmin ? "删除物品" : "申请删除"}</button></div>}
             <section className="history-section"><h3><Clock3 size={17} />位置记录</h3>{history.filter((entry) => entry.itemId === selectedDetail.id).length === 0 ? <p>暂无位置变更记录</p> : <ol>{history.filter((entry) => entry.itemId === selectedDetail.id).map((entry) => <li key={entry.id}><span>{locationLabel(entry.fromLocation ?? "")}</span><ChevronRight size={15} /><strong>{locationLabel(entry.toLocation)}</strong><time>{new Date(entry.movedAt).toLocaleString("zh-CN")}</time></li>)}</ol>}</section>
           </aside>
