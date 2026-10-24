@@ -13,7 +13,7 @@
 - 前端隐藏按钮之外，后端（RLS / RPC / Edge Function）仍有同等强制力；
 - 风险披露诚实（第 7 节的未测试项是否与你发现的相符）。
 
-最终按第 9 节模板输出：总体结论（通过 / 有条件通过 / 不通过）+ 按严重级别分级的问题清单。
+最终按第 10 节模板输出：总体结论（通过 / 有条件通过 / 不通过）+ 按严重级别分级的问题清单。分支当前为 9 个 commit（第 9 个为审核清单文档本身），HEAD 以 `git rev-parse codex/zcode-improvements` 实时为准。
 
 ## 2. 背景与授权边界
 
@@ -106,6 +106,7 @@ git format-patch 02896f67a6999ef49048addd55b15c9d855661de..codex/zcode-improveme
 | 20261024100000 | 重定义 `create_borrow_order_batch`（超管直借） | 重放 20261013063513 中的旧函数定义 |
 | 20261024110000 | 重定义 `review_borrow_return_request`（唯一超管自验）+ `update_borrow_order_status`（驳回必填理由） | 重放 20261007103248 / 20261007104410 中的旧函数定义 |
 | 20261024120000 | `activities` 加列 `auto_approve_borrows`（默认 FALSE）+ 再次重定义 `create_borrow_order_batch`（活动免审） | 列可保留；函数回退同上 |
+| 20261025100000 | 活动免审字段表级护栏触发器（仅有效超管可改变该字段值） | 删除触发器与函数即回到迁移 20261024120000 后的行为 |
 
 - 无 DDL 之外的表结构变更；无 RLS/Storage/Auth 变更；不动存量业务数据。
 - 发布顺序：三个迁移 → 部署 `manage-accounts` 函数 → 发布静态站。旧前端 + 新后端兼容（仅提交结果提示文案差异）；新前端 + 旧后端时超管直借/活动免审不生效（提示文案为"等待审批"），无功能故障。
@@ -138,7 +139,26 @@ git format-patch 02896f67a6999ef49048addd55b15c9d855661de..codex/zcode-improveme
 4. 「请联系」是否需要显示管理员姓名（需新增受控 RPC）。
 5. 品牌配色中"已确认/启用"徽标由绿转蓝是否符合预期（红/琥珀语义色未动）。
 
-## 9. 审核输出模板（请按此回复）
+## 9. 第二轮：GPT 审核两项 P1 的修复（新增，请复核）
+
+首轮外部审核（GPT）给出两项 P1，已在本地分支修复，请复核：
+
+**修复 1：活动免审的数据库层权限（迁移 20261025100000_activity_auto_approve_guard.sql）**
+
+- 新增 `private.guard_activity_auto_approve()` 触发器（BEFORE INSERT OR UPDATE OF auto_approve_borrows ON activities），沿用 `users_protect_password_change_flag` 的既有约定：值发生变化（false→true 或 true→false）时要求调用者为有效的启用超管（`private.current_app_role()`，即 is_active 且未卡首改密门禁）；service/definer 上下文豁免；保持原值编辑其他字段的 UPDATE 放行。
+- 部门管理员仍按既有 RLS 维护本部门活动的其他字段；直接 Supabase API 提交同样被触发器拦截（不依赖前端隐藏控件）。无 RLS 变更。
+- **复核点 F1**：触发器条件组合（INSERT 携带 TRUE / UPDATE 值变化 / UPDATE 值不变 / service 上下文）是否有绕过路径。
+- **复核点 F2**：回归 `super_admin_instant_borrow.sql` 第 10 节覆盖——管理员建活动带 TRUE 被拒、不带标记建活动成功（默认 false）、false→true 拒绝、true→false 拒绝、管理员照常编辑被标记活动的其他字段、成员更新活动被 RLS 过滤、超管自由开关、无标记活动借用仍走审批。
+
+**修复 2：manage-accounts 审计两阶段化（_shared/accountWorkflows.ts）**
+
+- 三个工作流（create/delete/reset_password）抽到 `_shared/accountWorkflows.ts`（index.ts 仅剩 HTTP 壳）；纯凭据助手移至 `_shared/accountCredentials.ts`（accounts.ts 原样 re-export，既有三个函数的导入不受影响）。
+- 审计改为两阶段：敏感副作用**之前**先向 `operation_logs` 写入意图行（`details.status='pending'`，含 type/student_id/name/role）；副作用成功后更新为 `completed`（含 stage/target_user_id），失败更新为 `failed`（含 stage，create 的 profile 失败还记录 Auth 临时账号是否清理成功）。意图写入失败 → 503 且**不执行任何副作用**；状态更新失败 → 返回 503 并明确告知"已生效但审计状态未完成"，绝不静默报成功。审计详情不含密码、token 或密钥。
+- Node 回归 `tests/accountWorkflows.test.mjs`（11 例，桩件模拟 Supabase 客户端）：意图先于副作用（全局序列断言）、成功路径 completed、副作用失败 stage 落库、意图失败取消操作且零副作用、状态更新失败不报成功、删除有历史者 409 且不写审计、审计行不含初始密码值/密码字段。
+- **复核点 F3**：两阶段方案下仍存在的理论残余（意图行写入后进程崩溃 → 永远 pending 的意图行，可通过日志巡检发现；状态更新与调用方响应之间无事务）是否可接受。
+- **复核点 F4**：`_shared/accountCredentials.ts` 抽取 + `accounts.ts` re-export 是否对既有三个函数（student-login / import-accounts / change-initial-password）零行为影响。
+
+## 10. 审核输出模板（请按此回复）
 
 ```markdown
 ## 总体结论：通过 / 有条件通过 / 不通过

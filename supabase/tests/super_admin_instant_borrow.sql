@@ -187,11 +187,12 @@ SELECT pg_temp.instant_assert((SELECT status = 'cancelled' AND notes = '数量�
   'Rejection reason is stored on the order');
 
 -- 8. Activities can opt out of approval: linked orders borrow instantly for every role.
-SELECT pg_temp.instant_actor('admin');
+-- The flag is super-admin-gated at the table level, so the fixture is created by super.
+SELECT pg_temp.instant_actor('super');
 WITH new_activity AS (
   INSERT INTO public.activities(name, department_id, status, auto_approve_borrows, created_by)
   VALUES ('Instant test activity', (SELECT department_id FROM instant_test_users WHERE label = 'admin'),
-    'active', TRUE, (SELECT app_id FROM instant_test_users WHERE label = 'admin'))
+    'active', TRUE, (SELECT app_id FROM instant_test_users WHERE label = 'super'))
   RETURNING id
 )
 INSERT INTO instant_test_state(label, id) SELECT 'auto_activity', id FROM new_activity;
@@ -260,6 +261,70 @@ SELECT public.review_borrow_return_request((SELECT id FROM instant_test_state WH
 SELECT pg_temp.instant_assert((SELECT status = 'returned'
   FROM public.borrow_orders WHERE id = (SELECT id FROM instant_test_state WHERE label = 'super_order2')),
   'Lone super admin can accept their own return');
+
+-- 10. auto_approve_borrows is guarded at the table level (INSERT and UPDATE).
+SELECT pg_temp.instant_actor('admin');
+-- Enabling the flag on a new activity is rejected for department admins.
+SELECT pg_temp.instant_reject('INSERT INTO public.activities(name, department_id, status, auto_approve_borrows, created_by)
+  VALUES (''Admin auto attempt'', (SELECT department_id FROM instant_test_users WHERE label = ''admin''), ''active'', TRUE,
+  (SELECT app_id FROM instant_test_users WHERE label = ''admin''))',
+  'Only active super administrators can change activity auto approval');
+-- Admins can still create their own activities without the flag.
+WITH plain AS (
+  INSERT INTO public.activities(name, department_id, status, created_by)
+  VALUES ('Admin plain activity', (SELECT department_id FROM instant_test_users WHERE label = 'admin'), 'active',
+    (SELECT app_id FROM instant_test_users WHERE label = 'admin'))
+  RETURNING id
+)
+INSERT INTO instant_test_state(label, id) SELECT 'plain_activity', id FROM plain;
+SELECT pg_temp.instant_assert((SELECT count(*) = 1 FROM public.activities
+  WHERE id = (SELECT id FROM instant_test_state WHERE label = 'plain_activity')
+    AND auto_approve_borrows = FALSE), 'Admin creates activities without the flag');
+-- Flipping an existing flag from false to true is rejected...
+SELECT pg_temp.instant_reject('UPDATE public.activities SET auto_approve_borrows = TRUE
+  WHERE id = (SELECT id FROM instant_test_state WHERE label = ''plain_activity'')',
+  'Only active super administrators can change activity auto approval');
+-- ...and so is disabling an enabled one (the value itself may not change).
+SELECT pg_temp.instant_reject('UPDATE public.activities SET auto_approve_borrows = FALSE
+  WHERE id = (SELECT id FROM instant_test_state WHERE label = ''auto_activity'')',
+  'Only active super administrators can change activity auto approval');
+-- Admins keep maintaining the other fields of an activity whose flag stays unchanged.
+SELECT pg_temp.instant_actor('admin');
+UPDATE public.activities SET description = 'updated by admin'
+WHERE id = (SELECT id FROM instant_test_state WHERE label = 'auto_activity');
+SELECT pg_temp.instant_assert((SELECT description = 'updated by admin' AND auto_approve_borrows = TRUE
+  FROM public.activities WHERE id = (SELECT id FROM instant_test_state WHERE label = 'auto_activity')),
+  'Admins keep editing other fields of a flagged activity');
+-- Members cannot modify activities at all (RLS silently filters the update).
+SELECT pg_temp.instant_actor('member');
+UPDATE public.activities SET name = 'member takeover'
+WHERE id = (SELECT id FROM instant_test_state WHERE label = 'plain_activity');
+SELECT pg_temp.instant_assert((SELECT name <> 'member takeover'
+  FROM public.activities WHERE id = (SELECT id FROM instant_test_state WHERE label = 'plain_activity')),
+  'Members cannot modify activities');
+-- Super admins can toggle the flag freely.
+SELECT pg_temp.instant_actor('super');
+UPDATE public.activities SET auto_approve_borrows = FALSE
+WHERE id = (SELECT id FROM instant_test_state WHERE label = 'auto_activity');
+SELECT pg_temp.instant_assert((SELECT auto_approve_borrows = FALSE
+  FROM public.activities WHERE id = (SELECT id FROM instant_test_state WHERE label = 'auto_activity')),
+  'Super admin can disable the flag');
+UPDATE public.activities SET auto_approve_borrows = TRUE
+WHERE id = (SELECT id FROM instant_test_state WHERE label = 'auto_activity');
+SELECT pg_temp.instant_assert((SELECT auto_approve_borrows = TRUE
+  FROM public.activities WHERE id = (SELECT id FROM instant_test_state WHERE label = 'auto_activity')),
+  'Super admin can re-enable the flag');
+-- An activity without the flag keeps the original approval flow.
+SELECT pg_temp.instant_actor('member2');
+INSERT INTO instant_test_state(label, id)
+SELECT 'plain_activity_order', public.create_borrow_order_batch(
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'item_id', (SELECT item_id FROM instant_test_state WHERE label = 'test_item'), 'quantity', 1)),
+  'plain activity approval', CURRENT_DATE + 1, NULL,
+  (SELECT id FROM instant_test_state WHERE label = 'plain_activity'));
+SELECT pg_temp.instant_assert((SELECT status = 'pending'
+  FROM public.borrow_orders WHERE id = (SELECT id FROM instant_test_state WHERE label = 'plain_activity_order')),
+  'Flag-free activity keeps the approval flow');
 
 RESET ROLE;
 ROLLBACK;
