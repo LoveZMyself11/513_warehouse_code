@@ -17,6 +17,7 @@ import {
   DoorOpen,
   Edit3,
   FileSpreadsheet,
+  KeyRound,
   Layers3,
   ListChecks,
   LogOut,
@@ -516,6 +517,7 @@ function App() {
   const [accountCreatorRole, setAccountCreatorRole] = useState<UserRole>("member");
   const [accountModalError, setAccountModalError] = useState<string | null>(null);
   const [deleteUserId, setDeleteUserId] = useState<number | null>(null);
+  const [resetPasswordUserId, setResetPasswordUserId] = useState<number | null>(null);
   const [borrowEditorOpen, setBorrowEditorOpen] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [activityEditor, setActivityEditor] = useState<{ mode: EditorMode; activity?: Activity } | null>(null);
@@ -1120,6 +1122,22 @@ function App() {
     }
   };
 
+  const handlePasswordReset = async () => {
+    if (!client || !isSuperAdmin || resetPasswordUserId === null) return;
+    setSubmitting(true);
+    setAccountModalError(null);
+    try {
+      const { data, error } = await client.functions.invoke("manage-accounts", { body: { action: "reset_password", userId: resetPasswordUserId } });
+      if (error || !data?.success) throw new Error(await accountFunctionError(error, data?.error || "密码重置失败，请稍后重试。"));
+      setNotice(`已将 ${managedUsers.find((user) => user.id === resetPasswordUserId)?.name ?? "该人员"} 的密码重置为初始密码，下次登录须重新设置。`);
+      setResetPasswordUserId(null);
+    } catch (resetError) {
+      setAccountModalError(errorMessage(resetError));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleBorrowSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!client || !profile || selectedItems.length === 0) return;
@@ -1717,7 +1735,7 @@ function App() {
                       <td><div className="user-cell"><strong>{departmentName(user.departmentId)}</strong><small>{user.position || "未填写职位"}</small></div></td>
                       <td>{user.phone || "未填写"}</td>
                       <td><span className={`status-badge ${user.isActive ? "confirmed" : "cancelled"}`}>{user.isActive ? "启用" : "已停用"}</span></td>
-                      <td className="action-cell"><button className="secondary-button compact-button" onClick={() => setUserEditor(user)}><Edit3 size={15} />编辑</button>{isSuperAdmin && <button className="danger-button compact-button" onClick={() => { setAccountModalError(null); setDeleteUserId(user.id); }} disabled={submitting || user.id === profile?.id} title={user.id === profile?.id ? "不能删除当前登录的账号" : undefined} aria-label={`删除 ${user.name}`}><Trash2 size={15} />删除</button>}</td>
+                      <td className="action-cell"><button className="secondary-button compact-button" onClick={() => setUserEditor(user)}><Edit3 size={15} />编辑</button>{isSuperAdmin && <button className="secondary-button compact-button" onClick={() => { setAccountModalError(null); setResetPasswordUserId(user.id); }} disabled={submitting || user.id === profile?.id || !user.authUserId} title={user.id === profile?.id ? "不能重置当前登录的账号" : !user.authUserId ? "该账号未关联登录，无需重置密码" : undefined} aria-label={`重置 ${user.name} 的密码`}><KeyRound size={15} />重置密码</button>}{isSuperAdmin && <button className="danger-button compact-button" onClick={() => { setAccountModalError(null); setDeleteUserId(user.id); }} disabled={submitting || user.id === profile?.id} title={user.id === profile?.id ? "不能删除当前登录的账号" : undefined} aria-label={`删除 ${user.name}`}><Trash2 size={15} />删除</button>}</td>
                     </tr>
                   ))}</tbody></table>
                   {isSuperAdmin && group.users.length === 0 && <div className="empty-state"><UsersRound size={27} /><strong>{group.label}暂无人员</strong><span>点击右上角「新增{group.label}」创建账号</span></div>}
@@ -1915,6 +1933,22 @@ function App() {
               <p className="muted-text">删除会同时注销其登录账号，且不可恢复。有借用、归还或库存申请记录的人员无法删除，请改为在「编辑」中停用账号。</p>
               {accountModalError && <div className="auth-message" role="alert">{accountModalError}</div>}
               <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setDeleteUserId(null)}>取消</button><button type="button" className="danger-button" onClick={() => void handleAccountDelete()} disabled={submitting}>{submitting ? "删除中..." : "确认删除"}</button></div>
+            </section>
+          </div>
+        );
+      })()}
+
+      {resetPasswordUserId !== null && (() => {
+        const resetUser = managedUsers.find((user) => user.id === resetPasswordUserId);
+        if (!resetUser) return null;
+        return (
+          <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setResetPasswordUserId(null)}>
+            <section className="modal" role="dialog" aria-modal="true" aria-labelledby="password-reset-title">
+              <header><div><p className="eyebrow">账户与权限</p><h2 id="password-reset-title">重置密码</h2></div><button className="icon-button" onClick={() => setResetPasswordUserId(null)} aria-label="关闭"><X size={20} /></button></header>
+              <p>确定将 <strong>{resetUser.name}</strong>（{resetUser.studentId || `用户 #${resetUser.id}`}，{roleMeta[resetUser.role]}）的密码重置为初始密码？</p>
+              <p className="muted-text">重置后的初始密码为 513base123，该账号下次登录时会再次要求设置新密码。</p>
+              {accountModalError && <div className="auth-message" role="alert">{accountModalError}</div>}
+              <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setResetPasswordUserId(null)}>取消</button><button type="button" className="primary-button" onClick={() => void handlePasswordReset()} disabled={submitting}>{submitting ? "重置中..." : "确认重置"}</button></div>
             </section>
           </div>
         );

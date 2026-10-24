@@ -27,6 +27,10 @@ Deno.serve(async (request) => {
       const result = await deleteAccount(admin, actor.id, body.userId);
       return respond(result.body, result.status);
     }
+    if (body?.action === "reset_password") {
+      const result = await resetPassword(admin, actor.id, body.userId);
+      return respond(result.body, result.status);
+    }
     return respond({ error: "不支持的操作类型。" }, 400);
   } catch {
     return respond({ error: "账号管理服务暂不可用，请稍后重试。" }, 503);
@@ -111,5 +115,25 @@ async function deleteAccount(admin: AdminClient, actorId: number, rawUserId: unk
     if (profileDeleteError) return { body: { error: "删除人员资料失败，请稍后重试。" }, status: 503 };
   }
   await admin.from("operation_logs").insert({ user_id: actorId, action: "delete", details: { type: "account_delete", target_user_id: target.id, student_id: target.student_id, name: target.name, role: target.role } });
+  return { body: { success: true }, status: 200 };
+}
+
+async function resetPassword(admin: AdminClient, actorId: number, rawUserId: unknown): Promise<Result> {
+  const userId = Number(rawUserId);
+  if (!Number.isInteger(userId) || userId <= 0) return { body: { error: "人员标识不正确。" }, status: 400 };
+  const { data: target, error: targetError } = await admin.from("users")
+    .select("id, student_id, name, role, is_active, auth_user_id").eq("id", userId).maybeSingle();
+  if (targetError) return { body: { error: "人员信息读取失败，请稍后重试。" }, status: 503 };
+  if (!target) return { body: { error: "人员不存在或已被删除。" }, status: 404 };
+  if (target.id === actorId) return { body: { error: "不能重置当前登录的账号。" }, status: 409 };
+  if (!target.auth_user_id) return { body: { error: "该人员没有关联的登录账号，无需重置密码。" }, status: 409 };
+
+  const { error: passwordError } = await admin.auth.admin.updateUserById(target.auth_user_id, { password: initialPassword });
+  if (passwordError) return { body: { error: "密码重置失败，请稍后重试。" }, status: 503 };
+  // The initial-password gate trigger only allows this write from the service context.
+  const { error: gateError } = await admin.from("users")
+    .update({ must_change_password: true, password_changed_at: null }).eq("id", target.id);
+  if (gateError) return { body: { error: "密码已重置，但首次改密标记设置失败，请重试或联系开发者处理。" }, status: 503 };
+  await admin.from("operation_logs").insert({ user_id: actorId, action: "update", details: { type: "account_password_reset", target_user_id: target.id, student_id: target.student_id, name: target.name } });
   return { body: { success: true }, status: 200 };
 }
