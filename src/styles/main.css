@@ -724,3 +724,19 @@ code { color: #384351; font-family: "SFMono-Regular", Consolas, monospace; font-
 
 /* 活动卡片免审标记 */
 .activity-free-badge { margin-left: 8px; vertical-align: 2px; }
+
+/* 工作台右栏：今日待办 + 近期流转 */
+.dashboard-todo-list { display: flex; flex-direction: column; gap: 9px; }
+.dashboard-todo-list button { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border: 1px solid var(--amber-soft); border-radius: 6px; color: var(--ink); background: #fffcf5; font-size: 12px; font-weight: 700; text-align: left; }
+.dashboard-todo-list button:hover { border-color: #e0c98f; background: #fff8e8; }
+.dashboard-todo-list button svg { flex: none; color: var(--amber); }
+.dashboard-todo-empty { margin: 4px 0 0; }
+.dashboard-feed-heading { margin-top: 22px; }
+.dashboard-feed { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; }
+.dashboard-feed li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.dashboard-feed li:last-child { border-bottom: 0; padding-bottom: 0; }
+.dashboard-feed li > svg { flex: none; margin-top: 2px; color: var(--brand); }
+.dashboard-feed li > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.dashboard-feed li strong { color: var(--ink); font-size: 12px; }
+.dashboard-feed li small { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-feed li time { flex: none; color: #8a919c; font-size: 10px; }

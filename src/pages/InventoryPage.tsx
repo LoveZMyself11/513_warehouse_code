@@ -20,6 +20,7 @@ import {
   Layers3,
   ListChecks,
   LogOut,
+  Home,
   MapPin,
   Menu,
   MoreHorizontal,
@@ -35,7 +36,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { accountFunctionError } from "../auth/accountApi";
 import { locationLabel, locations, parseLocationQr } from "../locations";
@@ -479,6 +480,7 @@ function LocationSelect({ defaultValue }: { defaultValue: string }) {
 function App() {
   const { client, session, profile } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const isSuperAdmin = profile?.role === "super_admin";
   const isAdmin = profile?.role === "admin";
   const canManageUsers = isSuperAdmin || isAdmin;
@@ -1654,6 +1656,7 @@ function App() {
         <button className="icon-button mobile-menu" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? "关闭位置导航" : "打开位置导航"} aria-expanded={mobileNavOpen} aria-controls="warehouse-navigation" title="位置导航"><Menu size={20} /></button>
         <img className="brand-mark" src={`${import.meta.env.BASE_URL}department-emblem.jpg`} alt="信息技术学部队徽" />
         <div className="brand-copy"><strong>信息技术学部</strong><span>仓库借用系统</span></div>
+        <button className="icon-button topbar-home" onClick={() => navigate("/")} aria-label="返回工作台" title="返回工作台"><Home size={18} /></button>
         <div className="topbar-summary"><span><Box size={16} /> {items.length} 件物品</span>{profile?.role === "member" ? <><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="查看借用状态"><PackageCheck size={16} /> {memberBorrowActionCount} 个借用流程</button><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="查看未归还物品"><RotateCcw size={16} /> {outstandingBorrowItemCount} 件未归还</button></> : <><button type="button" className="topbar-stat" onClick={() => setView("requests")} title="前往物品审批"><ClipboardList size={16} /> {pendingRequestCount} 个待审批</button><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="前往借用审批"><PackageCheck size={16} /> {pendingBorrowCount} 个借用待处理</button></>}</div>
         <span className="account-email" title={session?.user.email}>{profile?.name} · {profile?.role}</span>
         <button className="icon-button sign-out-button" onClick={() => client?.auth.signOut()} aria-label="退出登录" title="退出登录"><LogOut size={18} /></button>
@@ -1811,8 +1814,8 @@ function App() {
           </>
         ) : view === "announcements" ? (
           <>
-            <div className="content-heading"><div><p className="eyebrow">系统通知</p><h1>公告管理</h1><p>发布会显示在对应角色工作台中的系统公告。</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button><button className="primary-button" onClick={() => setAnnouncementEditor("create")}><BellRing size={17} />发布公告</button></div></div>
-            <section className="inventory-panel"><div className="table-wrap"><table><thead><tr><th>标题</th><th>内容</th><th>目标角色</th><th>有效期</th><th>状态</th><th>操作</th></tr></thead><tbody>{announcements.map((announcement) => <tr key={announcement.id}><td><strong>{announcement.title}</strong></td><td><span className="request-summary">{announcement.content}</span></td><td>{announcement.target_role ? roleMeta[announcement.target_role] : "全部角色"}</td><td>{formatDateTime(announcement.starts_at)}<br />至 {announcement.ends_at ? formatDateTime(announcement.ends_at) : "长期"}</td><td><span className={`status-badge ${announcement.is_active ? "confirmed" : "cancelled"}`}>{announcement.is_active ? "已启用" : "已停用"}</span></td><td className="action-cell"><button className="secondary-button compact-button" onClick={() => setAnnouncementEditor(announcement)}><Edit3 size={15} />编辑</button><button className="danger-button compact-button" onClick={() => setDeleteAnnouncementId(announcement.id)}><Trash2 size={15} />删除</button></td></tr>)}</tbody></table>{!loading && announcements.length === 0 && <div className="empty-state"><BellRing size={27} /><strong>暂无公告</strong><span>发布第一条系统公告</span></div>}</div></section>
+            <div className="content-heading"><div><p className="eyebrow">系统通知</p><h1>公告管理</h1><p>发布会显示在对应角色工作台中的系统公告。</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button>{isSuperAdmin && <button className="primary-button" onClick={() => setAnnouncementEditor("create")}><BellRing size={17} />发布公告</button>}</div></div>
+            <section className="inventory-panel"><div className="table-wrap"><table><thead><tr><th>标题</th><th>内容</th><th>目标角色</th><th>有效期</th><th>状态</th><th>操作</th></tr></thead><tbody>{announcements.map((announcement) => <tr key={announcement.id}><td><strong>{announcement.title}</strong></td><td><span className="request-summary">{announcement.content}</span></td><td>{announcement.target_role ? roleMeta[announcement.target_role] : "全部角色"}</td><td>{formatDateTime(announcement.starts_at)}<br />至 {announcement.ends_at ? formatDateTime(announcement.ends_at) : "长期"}</td><td><span className={`status-badge ${announcement.is_active ? "confirmed" : "cancelled"}`}>{announcement.is_active ? "已启用" : "已停用"}</span></td><td className="action-cell">{isSuperAdmin && <><button className="secondary-button compact-button" onClick={() => setAnnouncementEditor(announcement)}><Edit3 size={15} />编辑</button><button className="danger-button compact-button" onClick={() => setDeleteAnnouncementId(announcement.id)}><Trash2 size={15} />删除</button></>}{!isSuperAdmin && <span className="muted-text">仅超级管理员可维护</span>}</td></tr>)}</tbody></table>{!loading && announcements.length === 0 && <div className="empty-state"><BellRing size={27} /><strong>暂无公告</strong><span>发布第一条系统公告</span></div>}</div></section>
           </>
         ) : view === "activities" ? (
           <>
