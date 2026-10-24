@@ -1,5 +1,5 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { Boxes, LoaderCircle, LogOut, ShieldAlert } from "lucide-react";
+import { LoaderCircle, LogOut, ShieldAlert } from "lucide-react";
 import { useAuth } from "./AuthProvider";
 import ChangeInitialPassword from "./ChangeInitialPassword";
 import LegalFooter from "../components/LegalFooter";
@@ -11,7 +11,7 @@ export default function ProtectedRoute() {
   if (loading) {
     return (
       <main className="auth-loading" aria-live="polite">
-        <div className="brand-mark"><Boxes size={22} /></div>
+        <img className="brand-mark" src={`${import.meta.env.BASE_URL}department-emblem.jpg`} alt="信息技术学部队徽" />
         <LoaderCircle className="spin" size={22} />
         <span>正在验证登录状态</span>
       </main>
@@ -27,8 +27,8 @@ export default function ProtectedRoute() {
       <main className="auth-page">
         <section className="auth-panel access-panel" aria-labelledby="access-title">
           <div className="auth-brand">
-            <div className="brand-mark"><Boxes size={22} /></div>
-            <div><strong>513 仓库</strong><span>物品管理台</span></div>
+            <img className="brand-mark" src={`${import.meta.env.BASE_URL}department-emblem.jpg`} alt="信息技术学部队徽" />
+            <div><strong>信息技术学部</strong><span>仓库借用系统</span></div>
           </div>
           <div className="access-message">
             <ShieldAlert size={30} />

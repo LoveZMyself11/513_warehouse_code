@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { Boxes, IdCard, LockKeyhole } from "lucide-react";
+import { IdCard, LockKeyhole } from "lucide-react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
 import { accountFunctionError } from "./accountApi";
@@ -59,17 +59,17 @@ export default function LoginPage() {
     <main className="auth-page">
       <section className="auth-panel" aria-labelledby="auth-title">
         <div className="auth-brand">
-          <div className="brand-mark"><Boxes size={22} /></div>
+          <img className="brand-mark" src={`${import.meta.env.BASE_URL}department-emblem.jpg`} alt="信息技术学部队徽" />
           <div>
-            <strong>513 仓库</strong>
-            <span>物品管理台</span>
+            <strong>信息技术学部</strong>
+            <span>仓库借用系统</span>
           </div>
         </div>
 
         <div className="auth-heading">
           <p className="eyebrow">账户访问</p>
           <h1 id="auth-title">登录管理台</h1>
-          <p>513 仓库物品借用与归还</p>
+          <p>仓库物品借用与归还管理平台</p>
         </div>
 
         {!configured ? (

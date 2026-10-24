@@ -29,6 +29,7 @@
 | 借用提交确认 + 直系上级提示 | 借用单一键提交无核对环节；提交后只有一行提示，忘记密码的流程外沟通缺少指引 | 所有身份提交借用单先弹出确认窗（仅物品与数量，可返回修改）；确认后弹出结果窗：普通用户「请联系：本部门管理员」、部门管理员「请联系：主席团」、超管「超级管理员免审」、免审活动「「活动名」活动免审」 | `src/pages/InventoryPage.tsx` | 浏览器：超管/部门管理员/免审活动三种结果文案均验证（截图 patch2x-borrow-confirm.png、patch2x-borrow-result-super.png） |
 | 活动借用免审（负责人下一补丁） | 大型活动期间大量借用单逐单审批，对部门管理员与超管压力大 | 活动表新增 `auto_approve_borrows`；活动编辑页仅超管可勾选「该活动借用免审」；关联免审活动的借用单任何身份提交后直接借出（数量/并发校验一致，审计 `auto_source='activity'`）；借用弹窗活动下拉显示「（免审）」标记，活动卡片显示免审徽标；归还仍走统一验收 | `supabase/migrations/20261024120000_activity_auto_approve.sql`、`src/pages/InventoryPage.tsx` | SQL 回归：member/admin 关联免审活动直借、`auto_source` 审计、归还仍需验收；浏览器：创建免审活动→关联提交→直借结果提示 |
 | 顶栏统计可点击 | 登录后顶栏「N 个待审批 / N 个借用待处理」只是文字，无法点击 | 改为按钮：待审批→物品审批（我的申请），借用待处理→借用监管（借用状态），成员的借用流程/未归还→借用状态 | `src/pages/InventoryPage.tsx`、`src/styles/main.css` | 浏览器：admin01 点击「个待审批」跳到「我的申请」 |
+| 品牌改版：学部队徽 + 新名称 + 蓝色主题 | 品牌为「513 仓库 / 物品管理台」金色图标，主题色为绿色 | 顶栏、登录页、首次改密页、账户不可用页品牌统一替换为学部队徽（`public/department-emblem.jpg`，负责人提供的校方图样）与「信息技术学部 / 仓库借用系统」；浏览器标签标题同步；主样式全部绿色系色值按色相映射为队徽蓝色系（`--green/--green-dark/--green-soft` 变量更名为 `--brand*`），顶栏 CTA 由金色改为白底蓝字；语义状态色保留：琥珀=待审批/待分层、红=驳回/停用、已确认/已启用徽标转为品牌蓝 | `public/department-emblem.jpg`、`src/pages/DashboardPage.tsx`、`src/pages/InventoryPage.tsx`、`src/auth/LoginPage.tsx`、`src/auth/ChangeInitialPassword.tsx`、`src/auth/ProtectedRoute.tsx`、`src/components/DeveloperContact.tsx`、`src/styles/main.css`、`index.html` | 浏览器截图：登录页（rebrand-login.png）、顶栏品牌区（rebrand-topbar.png）、工作台；构建通过 |
 | 非超管视图不受影响 | 部门管理员原可编辑本部门成员资料 | 保持原样：仅本部门普通用户、仅「编辑」；新增/删除入口只对 super_admin 渲染 | `src/pages/InventoryPage.tsx` | admin01 登录验证：无新增/删除按钮，仅见组织部成员 |
 | 表单校验与导入规则一致 | — | 新增 `src/lib/accountAdmin.ts`：学号/姓名/部门/手机号/身份/邮箱/职位/备注校验 + 角色分组排序纯函数，服务端 `manage-accounts` 使用相同规则（与 import-accounts 的行校验逐条一致） | `src/lib/accountAdmin.ts`、`tests/accountAdmin.test.mjs` | `npm run test:auth-storage`（新增 4 个用例） |
 
@@ -72,6 +73,8 @@
   - `docs/images/zcode/patch2-super-instant-borrow.png`：超管提交借用单后订单直接「借出中」与免审核提示
   - `docs/images/zcode/patch2x-borrow-confirm.png`：借用提交前的物品/数量确认弹窗
   - `docs/images/zcode/patch2x-borrow-result-super.png`：超管提交后的免审结果弹窗（借出中订单在背后可见）
+  - `docs/images/zcode/rebrand-login.png`：学部队徽 + 新名称 + 蓝色主题的登录页
+  - `docs/images/zcode/rebrand-topbar.png`：应用顶栏品牌区特写
 - 浏览器 GUI 走查（ZCode 内置浏览器）：超管分组顺序与人数、建号→入组、删除→空组、弹窗内校验错误（无效手机号）、admin01 受限视图（无新增/删除入口，仅本部门 member、仅编辑）、重置密码→初始密码登录→强制改密页→完成改密进入工作台、补丁 2 超管直借即时「借出中」、部门管理员借用待审批→超管批准→借出中、补丁 3 确认弹窗与三种提交结果文案（主席团/超管免审/活动免审）、免审活动创建与徽标、借用审批「确认借出/驳回」按钮、驳回必填理由且借用人订单显示理由、顶栏统计点击跳转，均通过。
 - **未测试项 / 已知风险**：
   1. 手机端布局未实测（无真实设备）；分组标题与按钮使用了既有响应式类，小屏表现建议发布前抽查。

@@ -3,7 +3,6 @@ import {
   Archive,
   Ban,
   Box,
-  Boxes,
   Camera,
   Check,
   CalendarRange,
@@ -1448,7 +1447,7 @@ function App() {
     try {
       const { default: ExcelJS } = await import("exceljs");
       const workbook = new ExcelJS.Workbook();
-      workbook.creator = "513 仓库物品管理台";
+      workbook.creator = "信息技术学部仓库借用系统";
       const worksheet = workbook.addWorksheet("库存物品");
       worksheet.columns = [
         { header: "物品名称", key: "name", width: 28 },
@@ -1653,8 +1652,8 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <button className="icon-button mobile-menu" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? "关闭位置导航" : "打开位置导航"} aria-expanded={mobileNavOpen} aria-controls="warehouse-navigation" title="位置导航"><Menu size={20} /></button>
-        <div className="brand-mark"><Boxes size={20} /></div>
-        <div className="brand-copy"><strong>513 仓库</strong><span>物品管理台</span></div>
+        <img className="brand-mark" src={`${import.meta.env.BASE_URL}department-emblem.jpg`} alt="信息技术学部队徽" />
+        <div className="brand-copy"><strong>信息技术学部</strong><span>仓库借用系统</span></div>
         <div className="topbar-summary"><span><Box size={16} /> {items.length} 件物品</span>{profile?.role === "member" ? <><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="查看借用状态"><PackageCheck size={16} /> {memberBorrowActionCount} 个借用流程</button><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="查看未归还物品"><RotateCcw size={16} /> {outstandingBorrowItemCount} 件未归还</button></> : <><button type="button" className="topbar-stat" onClick={() => setView("requests")} title="前往物品审批"><ClipboardList size={16} /> {pendingRequestCount} 个待审批</button><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="前往借用审批"><PackageCheck size={16} /> {pendingBorrowCount} 个借用待处理</button></>}</div>
         <span className="account-email" title={session?.user.email}>{profile?.name} · {profile?.role}</span>
         <button className="icon-button sign-out-button" onClick={() => client?.auth.signOut()} aria-label="退出登录" title="退出登录"><LogOut size={18} /></button>

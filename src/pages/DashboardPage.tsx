@@ -5,7 +5,6 @@ import {
   BarChart3,
   BellRing,
   Box,
-  Boxes,
   Building2,
   CalendarRange,
   ClipboardList,
@@ -188,7 +187,7 @@ export default function RoleDashboard() {
   return (
     <div className="dashboard-shell">
       <header className="dashboard-topbar">
-        <div className="dashboard-brand"><span className="brand-mark"><Boxes size={20} /></span><span><strong>513 仓库</strong><small>物品管理台</small></span></div>
+        <div className="dashboard-brand"><img className="brand-mark" src={`${import.meta.env.BASE_URL}department-emblem.jpg`} alt="信息技术学部队徽" /><span><strong>信息技术学部</strong><small>仓库借用系统</small></span></div>
         <div className="dashboard-account"><span>{profile.name} · {copy.label}</span><button className="icon-button dashboard-sign-out" onClick={() => client?.auth.signOut()} aria-label="退出登录" title="退出登录"><LogOut size={18} /></button></div>
       </header>
 
