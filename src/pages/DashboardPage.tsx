@@ -47,25 +47,32 @@ const initialStats: DashboardStats = {
   departmentName: "未分配部门",
 };
 
-const roleMeta: Record<UserRole, { label: string; eyebrow: string; title: string; description: string }> = {
+const roleMeta: Record<UserRole, { label: string; eyebrow: string; description: string }> = {
   super_admin: {
     label: "系统管理员",
     eyebrow: "系统总览",
-    title: "管理仓库的每个环节",
     description: "从库存、活动到人员和借用流程，集中处理系统运营事项。",
   },
   admin: {
     label: "部门管理员",
     eyebrow: "部门工作台",
-    title: "掌握本部门的借用进度",
     description: "查看成员、处理借用申请，并维护本部门的日常资料。",
   },
   member: {
     label: "普通用户",
     eyebrow: "个人工作台",
-    title: "开始一次物品借用",
     description: "浏览可借物品，查看申请状态，按原位完成归还。",
   },
+};
+
+const greetingFor = (date: Date) => {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 9) return "早上好";
+  if (hour < 12) return "上午好";
+  if (hour < 14) return "中午好";
+  if (hour < 18) return "下午好";
+  if (hour < 23) return "晚上好";
+  return "夜深了";
 };
 
 function countRows<T>(result: { data: T[] | null; error: unknown | null }) {
@@ -138,25 +145,25 @@ export default function RoleDashboard() {
   const statCards = useMemo(() => {
     if (role === "super_admin") {
       return [
-        { label: "正式库存", value: stats.inventoryCount, hint: "已批准物品", icon: Box },
-        { label: "待审批请求", value: stats.pendingRequests, hint: "库存变更申请", icon: ClipboardList, attention: stats.pendingRequests > 0 },
-        { label: "待处理借用", value: stats.pendingBorrows, hint: "等待部门处理", icon: PackageCheck, attention: stats.pendingBorrows > 0 },
-        { label: "启用中活动", value: stats.activeActivities, hint: "可关联到借用单", icon: CalendarRange },
+        { label: "正式库存", value: stats.inventoryCount, hint: "已批准物品", icon: Box, view: "inventory" as DashboardView },
+        { label: "待审批请求", value: stats.pendingRequests, hint: "库存变更申请", icon: ClipboardList, attention: stats.pendingRequests > 0, view: "requests" as DashboardView },
+        { label: "待处理借用", value: stats.pendingBorrows, hint: "等待部门处理", icon: PackageCheck, attention: stats.pendingBorrows > 0, view: "borrows" as DashboardView },
+        { label: "启用中活动", value: stats.activeActivities, hint: "可关联到借用单", icon: CalendarRange, view: "activities" as DashboardView },
       ];
     }
     if (role === "admin") {
       return [
-        { label: "本部门成员", value: stats.memberCount, hint: stats.departmentName, icon: UsersRound },
-        { label: "待审批借用", value: stats.pendingBorrows, hint: "需要及时处理", icon: ClipboardList, attention: stats.pendingBorrows > 0 },
-        { label: "借出中订单", value: stats.activeBorrows, hint: "含待审核归还", icon: PackageCheck },
-        { label: "启用中活动", value: stats.activeActivities, hint: "部门可用活动", icon: CalendarRange },
+        { label: "本部门成员", value: stats.memberCount, hint: stats.departmentName, icon: UsersRound, view: "users" as DashboardView },
+        { label: "待审批借用", value: stats.pendingBorrows, hint: "需要及时处理", icon: ClipboardList, attention: stats.pendingBorrows > 0, view: "borrows" as DashboardView },
+        { label: "借出中订单", value: stats.activeBorrows, hint: "含待审核归还", icon: PackageCheck, view: "borrows" as DashboardView },
+        { label: "启用中活动", value: stats.activeActivities, hint: "部门可用活动", icon: CalendarRange, view: "activities" as DashboardView },
       ];
     }
     return [
-      { label: "可借物品", value: stats.inventoryCount, hint: "浏览正式库存", icon: Box },
-      { label: "我的借用单", value: stats.myBorrowOrders, hint: "全部状态", icon: ClipboardList },
-      { label: "待处理流程", value: stats.pendingBorrows, hint: "审批中的申请", icon: BellRing, attention: stats.pendingBorrows > 0 },
-      { label: "尚未归还", value: stats.outstandingItems, hint: "请按原位归还", icon: PackageCheck, attention: stats.outstandingItems > 0 },
+      { label: "可借物品", value: stats.inventoryCount, hint: "浏览正式库存", icon: Box, view: "inventory" as DashboardView },
+      { label: "我的借用单", value: stats.myBorrowOrders, hint: "全部状态", icon: ClipboardList, view: "borrows" as DashboardView },
+      { label: "待处理流程", value: stats.pendingBorrows, hint: "审批中的申请", icon: BellRing, attention: stats.pendingBorrows > 0, view: "borrows" as DashboardView },
+      { label: "尚未归还", value: stats.outstandingItems, hint: "请按原位归还", icon: PackageCheck, attention: stats.outstandingItems > 0, view: "borrows" as DashboardView },
     ];
   }, [role, stats]);
 
@@ -193,12 +200,12 @@ export default function RoleDashboard() {
 
       <main className="dashboard-main">
         <section className="dashboard-hero">
-          <div><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1><p>{copy.description}</p></div>
+          <div><p className="eyebrow">{copy.eyebrow}</p><h1>{profile ? `${greetingFor(new Date())}，${profile.name}，欢迎回来！` : "欢迎回来！"}</h1><p>{copy.description}</p></div>
           <div className="dashboard-hero-meta"><ShieldCheck size={19} /><span>{copy.label}<small>{role === "admin" ? stats.departmentName : "已授权账户"}</small></span></div>
         </section>
 
         <section className="dashboard-stats" aria-label="工作台统计">
-          {statCards.map(({ label, value, hint, icon: Icon, attention }) => <article key={label} className={attention ? "attention" : ""}><span className="dashboard-stat-icon"><Icon size={17} /></span><div><span>{label}</span><strong>{loading ? "--" : value}</strong><small>{hint}</small></div></article>)}
+          {statCards.map(({ label, value, hint, icon: Icon, attention, view }) => <button key={label} type="button" className={`dashboard-stat-card${attention ? " attention" : ""}`} onClick={() => goTo(view)} title={`前往${label}`}><span className="dashboard-stat-icon"><Icon size={17} /></span><div><span>{label}</span><strong>{loading ? "--" : value}</strong><small>{hint}</small></div></button>)}
         </section>
 
         <section className="dashboard-content-grid">
