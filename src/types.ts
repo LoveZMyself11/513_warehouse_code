@@ -60,6 +60,7 @@ export interface Activity {
   status: ActivityStatus;
   startDate: string | null;
   endDate: string | null;
+  autoApproveBorrows: boolean;
   createdBy: number | null;
   createdAt: string;
   updatedAt: string;

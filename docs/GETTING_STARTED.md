@@ -91,7 +91,7 @@ npm run check
 
 `schema.sql` 是早期仅含库存表的基础文件，不应替代这里的 `schema_v2.sql`。选择 seed 时必须在编号 sequence 初始化前执行；初始图片依赖本仓库的 `data/` 静态目录。
 
-### 全部七条迁移
+### 全部迁移
 
 基础文件完成后，按文件名字典序依次执行以下迁移。这些迁移相互依赖，不能只挑选最近的文件。
 
@@ -104,6 +104,11 @@ npm run check
 | 5 | [`20261007103355_student_login_account_import.sql`](../supabase/migrations/20261007103355_student_login_account_import.sql) | 学号规范化、登录限制与首次改密门禁 |
 | 6 | [`20261007104410_concrete_borrow_locations.sql`](../supabase/migrations/20261007104410_concrete_borrow_locations.sql) | 借出位置约束与历史位置修正 |
 | 7 | [`20261007111047_require_review_for_inventory_additions.sql`](../supabase/migrations/20261007111047_require_review_for_inventory_additions.sql) | 关闭直接新增库存的旁路，统一经审批上架 |
+| 8 | [`20261013063513_counted_inventory_borrowing.sql`](../supabase/migrations/20261013063513_counted_inventory_borrowing.sql) | 数量借用：可借数量 RPC、占用护栏与批量借用 RPC |
+| 9 | [`20261024100000_super_admin_instant_borrow.sql`](../supabase/migrations/20261024100000_super_admin_instant_borrow.sql) | 超级管理员借用免审直借 |
+| 10 | [`20261024110000_borrow_review_rules.sql`](../supabase/migrations/20261024110000_borrow_review_rules.sql) | 唯一超管自验归还、驳回必填理由 |
+| 11 | [`20261024120000_activity_auto_approve.sql`](../supabase/migrations/20261024120000_activity_auto_approve.sql) | 活动借用免审字段与直借 |
+| 12 | [`20261025100000_activity_auto_approve_guard.sql`](../supabase/migrations/20261025100000_activity_auto_approve_guard.sql) | 活动免审字段的表级权限护栏 |
 
 最后执行 [`supabase/verify_setup.sql`](../supabase/verify_setup.sql)。通过 SQL Editor 手动执行文件不会自动登记 Supabase CLI 的迁移历史；后续改用 CLI 管理时，先由维护者核对实际结构和历史，再处理基线登记，避免重复应用迁移。
 
@@ -117,7 +122,7 @@ npm run check
 
 ## 5. 部署账户 Edge Functions
 
-除了数据库，学号登录、账号导入与首次改密还依赖三个 Edge Functions。先核对目标项目，再部署：
+除了数据库，学号登录、账号导入、首次改密与超管账号管理还依赖四个 Edge Functions。先核对目标项目，再部署：
 
 ```bash
 supabase login
@@ -125,9 +130,10 @@ supabase link --project-ref your-project-ref
 supabase functions deploy student-login
 supabase functions deploy import-accounts
 supabase functions deploy change-initial-password
+supabase functions deploy manage-accounts
 ```
 
-[`supabase/config.toml`](../supabase/config.toml) 对这三个函数配置 `verify_jwt = false`。`student-login` 接收登录凭据；`import-accounts` 和 `change-initial-password` 在函数内验证 bearer token，导入还要求已启用、已完成首次改密的超级管理员。
+[`supabase/config.toml`](../supabase/config.toml) 对这四个函数配置 `verify_jwt = false`。`student-login` 接收登录凭据；`import-accounts` 和 `change-initial-password` 在函数内验证 bearer token，导入还要求已启用、已完成首次改密的超级管理员；`manage-accounts` 提供超管的单人建号、删号与密码重置，函数内同样验证调用者为有效超管，所有操作以两阶段方式写入审计日志。
 
 服务端读取 Supabase 环境中的 `SUPABASE_URL`、`SUPABASE_ANON_KEY` 和 `SUPABASE_SERVICE_ROLE_KEY`。这些凭据只存在于服务端配置，不能放入 `.env.example`、前端变量或 Git。函数部署方法可参考 [Supabase 官方文档](https://supabase.com/docs/guides/functions/deploy)。
 

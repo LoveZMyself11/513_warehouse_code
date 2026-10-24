@@ -3,7 +3,6 @@ import {
   Archive,
   Ban,
   Box,
-  Boxes,
   Camera,
   Check,
   CalendarRange,
@@ -17,9 +16,11 @@ import {
   DoorOpen,
   Edit3,
   FileSpreadsheet,
+  KeyRound,
   Layers3,
   ListChecks,
   LogOut,
+  Home,
   MapPin,
   Menu,
   MoreHorizontal,
@@ -31,16 +32,19 @@ import {
   Search,
   Send,
   Trash2,
+  UserPlus,
   UsersRound,
   X,
 } from "lucide-react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import { accountFunctionError } from "../auth/accountApi";
 import { locationLabel, locations, parseLocationQr } from "../locations";
 import type { IScannerControls } from "@zxing/browser";
 import DeveloperContact from "../components/DeveloperContact";
 import LegalFooter from "../components/LegalFooter";
 import AccountImport from "../components/AccountImport";
+import { ROLE_GROUP_LABELS, ROLE_ORDER, accountFormError, groupUsersByRole, normalizeAccountInput } from "../lib/accountAdmin";
 import { assetUrl } from "../lib/assetUrl";
 import { prepareInventoryImage } from "../lib/imageUpload";
 import { IMAGE_EXTENSIONS, storageFileName } from "../lib/storageFileName";
@@ -123,6 +127,7 @@ interface DbActivityRow {
   status: ActivityStatus;
   start_date: string | null;
   end_date: string | null;
+  auto_approve_borrows: boolean;
   created_by: number | null;
   created_at: string;
   updated_at: string;
@@ -350,6 +355,7 @@ const mapActivity = (row: DbActivityRow): Activity => ({
   status: row.status,
   startDate: row.start_date,
   endDate: row.end_date,
+  autoApproveBorrows: row.auto_approve_borrows,
   createdBy: row.created_by,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -415,6 +421,12 @@ const roleMeta: Record<UserRole, string> = {
   member: "普通用户",
 };
 
+const userGroupBadgeClass: Record<UserRole, string> = {
+  super_admin: "overview",
+  admin: "borrowed",
+  member: "confirmed",
+};
+
 const borrowStatusMeta: Record<BorrowOrderStatus, { label: string; className: string }> = {
   pending: { label: "待审批", className: "pending" },
   approved: { label: "已批准", className: "overview" },
@@ -468,6 +480,7 @@ function LocationSelect({ defaultValue }: { defaultValue: string }) {
 function App() {
   const { client, session, profile } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const isSuperAdmin = profile?.role === "super_admin";
   const isAdmin = profile?.role === "admin";
   const canManageUsers = isSuperAdmin || isAdmin;
@@ -503,7 +516,22 @@ function App() {
   const [departmentEditor, setDepartmentEditor] = useState<{ mode: EditorMode; department?: Department } | null>(null);
   const [deleteDepartmentId, setDeleteDepartmentId] = useState<number | null>(null);
   const [userEditor, setUserEditor] = useState<ManagedUser | null>(null);
+  const [accountCreatorOpen, setAccountCreatorOpen] = useState(false);
+  const [accountCreatorRole, setAccountCreatorRole] = useState<UserRole>("member");
+  const [accountModalError, setAccountModalError] = useState<string | null>(null);
+  const [deleteUserId, setDeleteUserId] = useState<number | null>(null);
+  const [resetPasswordUserId, setResetPasswordUserId] = useState<number | null>(null);
   const [borrowEditorOpen, setBorrowEditorOpen] = useState(false);
+  const [borrowConfirmRequest, setBorrowConfirmRequest] = useState<{
+    items: Array<{ item_id: string; quantity: number }>;
+    reason: string;
+    expectedReturnDate: string;
+    notes: string | null;
+    activityId: number | null;
+  } | null>(null);
+  const [borrowConfirmError, setBorrowConfirmError] = useState<string | null>(null);
+  const [borrowResultMessage, setBorrowResultMessage] = useState<string | null>(null);
+  const [rejectOrderId, setRejectOrderId] = useState<number | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [activityEditor, setActivityEditor] = useState<{ mode: EditorMode; activity?: Activity } | null>(null);
   const [announcementEditor, setAnnouncementEditor] = useState<DbAnnouncementRow | "create" | null>(null);
@@ -554,7 +582,7 @@ function App() {
       client.from("inventory_location_history").select("*").order("moved_at", { ascending: false }),
       client.from("inventory_change_requests").select("*").order("created_at", { ascending: false }),
       client.from("departments").select("id, name, description, created_at").order("name"),
-      client.from("activities").select("id, name, description, department_id, status, start_date, end_date, created_by, created_at, updated_at").order("created_at", { ascending: false }),
+      client.from("activities").select("id, name, description, department_id, status, start_date, end_date, auto_approve_borrows, created_by, created_at, updated_at").order("created_at", { ascending: false }),
       client.from("users").select("id, student_id, name, department_id, phone, email, position, notes, role, is_active, auth_user_id, created_at").order("name"),
       client.from("borrow_orders").select("*").order("created_at", { ascending: false }),
       client.from("borrow_items").select("*").order("id"),
@@ -1050,6 +1078,79 @@ function App() {
     await loadData();
   };
 
+  const openAccountCreator = (role: UserRole) => {
+    setAccountModalError(null);
+    setAccountCreatorRole(role);
+    setAccountCreatorOpen(true);
+  };
+
+  const handleAccountCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!client || !isSuperAdmin) return;
+    const form = new FormData(event.currentTarget);
+    const input = normalizeAccountInput({
+      studentId: String(form.get("studentId") ?? ""),
+      name: String(form.get("name") ?? ""),
+      department: String(form.get("department") ?? ""),
+      phone: String(form.get("phone") ?? ""),
+      role: String(form.get("role") ?? ""),
+      email: String(form.get("email") ?? ""),
+      position: String(form.get("position") ?? ""),
+      notes: String(form.get("notes") ?? ""),
+    });
+    const validationError = accountFormError(input);
+    if (validationError) {
+      setAccountModalError(validationError);
+      return;
+    }
+    setSubmitting(true);
+    setAccountModalError(null);
+    try {
+      const { data, error } = await client.functions.invoke("manage-accounts", { body: { action: "create", account: input } });
+      if (error || !data?.success) throw new Error(await accountFunctionError(error, data?.error || "账号创建失败，请稍后重试。"));
+      setNotice(`已创建 ${roleMeta[input.role as UserRole]}账号 ${input.name}（${input.studentId}），初始密码 513base123，首次登录须修改。`);
+      setAccountCreatorOpen(false);
+      await loadData();
+    } catch (createError) {
+      setAccountModalError(errorMessage(createError));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAccountDelete = async () => {
+    if (!client || !isSuperAdmin || deleteUserId === null) return;
+    setSubmitting(true);
+    setAccountModalError(null);
+    try {
+      const { data, error } = await client.functions.invoke("manage-accounts", { body: { action: "delete", userId: deleteUserId } });
+      if (error || !data?.success) throw new Error(await accountFunctionError(error, data?.error || "删除失败，请稍后重试。"));
+      setNotice("人员及其登录账号已删除。");
+      setDeleteUserId(null);
+      await loadData();
+    } catch (deleteError) {
+      setAccountModalError(errorMessage(deleteError));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (!client || !isSuperAdmin || resetPasswordUserId === null) return;
+    setSubmitting(true);
+    setAccountModalError(null);
+    try {
+      const { data, error } = await client.functions.invoke("manage-accounts", { body: { action: "reset_password", userId: resetPasswordUserId } });
+      if (error || !data?.success) throw new Error(await accountFunctionError(error, data?.error || "密码重置失败，请稍后重试。"));
+      setNotice(`已将 ${managedUsers.find((user) => user.id === resetPasswordUserId)?.name ?? "该人员"} 的密码重置为初始密码，下次登录须重新设置。`);
+      setResetPasswordUserId(null);
+    } catch (resetError) {
+      setAccountModalError(errorMessage(resetError));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleBorrowSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!client || !profile || selectedItems.length === 0) return;
@@ -1063,26 +1164,56 @@ function App() {
       setError("申请数量必须为正整数，且不能超过当前可借数量。请刷新库存后重试。");
       return;
     }
+    setBorrowConfirmError(null);
+    setBorrowConfirmRequest({
+      items: requestItems,
+      reason: String(form.get("reason") ?? "").trim(),
+      expectedReturnDate: String(form.get("expectedReturnDate") ?? ""),
+      notes: String(form.get("notes") ?? "").trim() || null,
+      activityId: String(form.get("activityId") ?? "") ? Number(form.get("activityId")) : null,
+    });
+  };
+
+  const submitBorrowRequest = async () => {
+    if (!client || !profile || !borrowConfirmRequest) return;
     setSubmitting(true);
+    setBorrowConfirmError(null);
     setError(null);
     setNotice(null);
-    const { error: createError } = await client.rpc("create_borrow_order_batch", {
-      p_items: requestItems,
-      p_reason: String(form.get("reason") ?? "").trim(),
-      p_expected_return_date: String(form.get("expectedReturnDate") ?? ""),
-      p_notes: String(form.get("notes") ?? "").trim() || null,
-      p_activity_id: String(form.get("activityId") ?? "") ? Number(form.get("activityId")) : null,
-    });
-    setSubmitting(false);
-    if (createError) {
-      setError(createError.message);
-      return;
+    try {
+      const { error: createError } = await client.rpc("create_borrow_order_batch", {
+        p_items: borrowConfirmRequest.items,
+        p_reason: borrowConfirmRequest.reason,
+        p_expected_return_date: borrowConfirmRequest.expectedReturnDate,
+        p_notes: borrowConfirmRequest.notes,
+        p_activity_id: borrowConfirmRequest.activityId,
+      });
+      if (createError) throw new Error(createError.message);
+      const linkedActivity = borrowConfirmRequest.activityId
+        ? activeActivities.find((activity) => activity.id === borrowConfirmRequest.activityId)
+        : undefined;
+      let message: string;
+      if (linkedActivity?.autoApproveBorrows) {
+        message = `借用单已提交并直接借出（「${linkedActivity.name}」活动免审），请按期归还并提交归还申请。`;
+      } else if (isSuperAdmin) {
+        message = "借用单已提交并直接借出（超级管理员免审），请按期归还并提交归还申请。";
+      } else if (isAdmin) {
+        message = "借用申请已提交，请联系：主席团。";
+      } else {
+        message = "借用申请已提交，请联系：本部门管理员。";
+      }
+      setBorrowResultMessage(message);
+      setNotice("借用申请已提交。");
+      setBorrowConfirmRequest(null);
+      setBorrowEditorOpen(false);
+      setSelectedItemIds(new Set());
+      setView("borrows");
+      await loadData();
+    } catch (submitError) {
+      setBorrowConfirmError(errorMessage(submitError));
+    } finally {
+      setSubmitting(false);
     }
-    setNotice("借用申请已提交，等待管理员审批。");
-    setBorrowEditorOpen(false);
-    setSelectedItemIds(new Set());
-    setView("borrows");
-    await loadData();
   };
 
   const handleReturnPhotoSelection = (borrowItemId: number, event: ChangeEvent<HTMLInputElement>) => {
@@ -1305,8 +1436,8 @@ function App() {
     if (canReview && nextBorrowStatuses(order.status).length) return <div className="borrow-action-stack">
       {borrowItems.some((line) => line.order_id === order.id && !isPhysicalLocation(items.find((item) => item.id === line.item_id)?.locationCode ?? ""))
         ? <span className="muted-text">请先确认物品层位</span>
-        : <button className="secondary-button compact-button" onClick={() => void updateBorrowStatus(order.id, "borrowed")} disabled={submitting}><Check size={14} />批准并借出</button>}
-      <button className="icon-button reject" onClick={() => void updateBorrowStatus(order.id, "cancelled")} disabled={submitting} title="拒绝借用" aria-label="拒绝借用"><Ban size={16} /></button>
+        : <button className="secondary-button compact-button" onClick={() => void updateBorrowStatus(order.id, "borrowed")} disabled={submitting}><Check size={14} />确认借出</button>}
+      <button className="danger-button compact-button" onClick={() => setRejectOrderId(order.id)} disabled={submitting}><Ban size={14} />驳回</button>
     </div>;
     return <span className="muted-text">{["returned", "cancelled"].includes(order.status) ? "已完成" : "等待管理员"}</span>;
   };
@@ -1318,7 +1449,7 @@ function App() {
     try {
       const { default: ExcelJS } = await import("exceljs");
       const workbook = new ExcelJS.Workbook();
-      workbook.creator = "513 仓库物品管理台";
+      workbook.creator = "信息技术学部仓库借用系统";
       const worksheet = workbook.addWorksheet("库存物品");
       worksheet.columns = [
         { header: "物品名称", key: "name", width: 28 },
@@ -1349,7 +1480,7 @@ function App() {
     }
   };
 
-  const updateBorrowStatus = async (orderId: number, status: BorrowOrderStatus) => {
+  const updateBorrowStatus = async (orderId: number, status: BorrowOrderStatus, notes: string | null = null) => {
     if (!client || (!isSuperAdmin && !isAdmin)) return;
     setSubmitting(true);
     setError(null);
@@ -1357,14 +1488,15 @@ function App() {
     const { error: updateError } = await client.rpc("update_borrow_order_status", {
       p_order_id: orderId,
       p_status: status,
-      p_notes: null,
+      p_notes: notes,
     });
     setSubmitting(false);
     if (updateError) {
       setError(updateError.message);
       return;
     }
-    setNotice("借用订单状态已更新。");
+    setNotice(status === "cancelled" ? "借用申请已驳回，驳回理由已同步给借用人。" : "借用订单已确认借出。");
+    setRejectOrderId(null);
     await loadData();
   };
 
@@ -1428,7 +1560,7 @@ function App() {
     setSubmitting(true);
     setError(null);
     setNotice(null);
-    const payload = {
+    const payload: Record<string, unknown> = {
       name,
       description: description || null,
       department_id: departmentId,
@@ -1436,6 +1568,7 @@ function App() {
       start_date: startDate,
       end_date: endDate,
     };
+    if (isSuperAdmin) payload.auto_approve_borrows = form.get("autoApproveBorrows") === "on";
     const result = activityEditor.mode === "create"
       ? await client.from("activities").insert({ ...payload, created_by: profile.id })
       : await client.from("activities").update(payload).eq("id", activityEditor.activity!.id);
@@ -1521,9 +1654,10 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <button className="icon-button mobile-menu" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? "关闭位置导航" : "打开位置导航"} aria-expanded={mobileNavOpen} aria-controls="warehouse-navigation" title="位置导航"><Menu size={20} /></button>
-        <div className="brand-mark"><Boxes size={20} /></div>
-        <div className="brand-copy"><strong>513 仓库</strong><span>物品管理台</span></div>
-        <div className="topbar-summary"><span><Box size={16} /> {items.length} 件物品</span>{profile?.role === "member" ? <><span><PackageCheck size={16} /> {memberBorrowActionCount} 个借用流程</span><span><RotateCcw size={16} /> {outstandingBorrowItemCount} 件未归还</span></> : <><span><ClipboardList size={16} /> {pendingRequestCount} 个待审批</span><span><PackageCheck size={16} /> {pendingBorrowCount} 个借用待处理</span></>}</div>
+        <img className="brand-mark" src={`${import.meta.env.BASE_URL}department-emblem.jpg`} alt="信息技术学部队徽" />
+        <div className="brand-copy"><strong>信息技术学部</strong><span>仓库借用系统</span></div>
+        <button className="icon-button topbar-home" onClick={() => navigate("/")} aria-label="返回工作台" title="返回工作台"><Home size={18} /></button>
+        <div className="topbar-summary"><span><Box size={16} /> {items.length} 件物品</span>{profile?.role === "member" ? <><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="查看借用状态"><PackageCheck size={16} /> {memberBorrowActionCount} 个借用流程</button><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="查看未归还物品"><RotateCcw size={16} /> {outstandingBorrowItemCount} 件未归还</button></> : <><button type="button" className="topbar-stat" onClick={() => setView("requests")} title="前往物品审批"><ClipboardList size={16} /> {pendingRequestCount} 个待审批</button><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="前往借用审批"><PackageCheck size={16} /> {pendingBorrowCount} 个借用待处理</button></>}</div>
         <span className="account-email" title={session?.user.email}>{profile?.name} · {profile?.role}</span>
         <button className="icon-button sign-out-button" onClick={() => client?.auth.signOut()} aria-label="退出登录" title="退出登录"><LogOut size={18} /></button>
         <button className="primary-button" onClick={() => { setView("inventory"); if (selectedItems.length) openBorrowEditor(); else setEditor({ mode: "create" }); }}>{selectedItems.length ? <ListChecks size={18} /> : <PackagePlus size={18} />}<span>{selectedItems.length ? "填写借用单" : "申请新增"}</span></button>
@@ -1631,19 +1765,30 @@ function App() {
           </>
         ) : view === "users" ? (
           <>
-            <div className="content-heading"><div><p className="eyebrow">账户与权限</p><h1>人员管理</h1><p>{isSuperAdmin ? "超级管理员可调整角色、部门与启用状态。" : `仅显示${departmentName(profile?.departmentId ?? null)}的普通用户，可维护人员资料。`}</p></div><div className="heading-actions">{isSuperAdmin && <AccountImport onImported={loadData} />}<button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button></div></div>
+            <div className="content-heading"><div><p className="eyebrow">账户与权限</p><h1>人员管理</h1><p>{isSuperAdmin ? "超级管理员可按身份分组新增、删除人员，并调整角色、部门与启用状态。" : `仅显示${departmentName(profile?.departmentId ?? null)}的普通用户，可维护人员资料。`}</p></div><div className="heading-actions">{isSuperAdmin && <button className="primary-button" onClick={() => openAccountCreator("member")}><UserPlus size={17} />新增人员</button>}{isSuperAdmin && <AccountImport onImported={loadData} />}<button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button></div></div>
             <section className="inventory-panel user-panel">
-              <div className="table-wrap"><table><thead><tr><th>人员</th><th>角色</th><th>部门 / 职位</th><th>联系方式</th><th>状态</th><th>操作</th></tr></thead>
-              <tbody>{visibleManagedUsers.map((user) => (
-                <tr key={user.id}>
-                  <td><div className="user-cell"><strong>{user.name}</strong><small>{user.studentId || `用户 #${user.id}`} · {user.email || "未绑定邮箱"}</small></div></td>
-                  <td><span className={`status-badge ${user.role === "super_admin" ? "overview" : user.role === "admin" ? "borrowed" : "confirmed"}`}>{roleMeta[user.role]}</span></td>
-                  <td><div className="user-cell"><strong>{departmentName(user.departmentId)}</strong><small>{user.position || "未填写职位"}</small></div></td>
-                  <td>{user.phone || "未填写"}</td>
-                  <td><span className={`status-badge ${user.isActive ? "confirmed" : "cancelled"}`}>{user.isActive ? "启用" : "已停用"}</span></td>
-                  <td className="action-cell"><button className="secondary-button compact-button" onClick={() => setUserEditor(user)}><Edit3 size={15} />编辑</button></td>
-                </tr>
-              ))}</tbody></table>{!loading && visibleManagedUsers.length === 0 && <div className="empty-state"><UsersRound size={27} /><strong>暂无可管理人员</strong><span>先在 Supabase Auth 创建账号，再关联用户资料</span></div>}</div>
+              {groupUsersByRole(visibleManagedUsers).filter((group) => isSuperAdmin || group.users.length > 0).map((group) => (
+                <div className="user-group" key={group.role}>
+                  <div className="user-group-heading">
+                    <span className={`status-badge ${userGroupBadgeClass[group.role]}`}>{group.label}</span>
+                    <small>{group.users.length} 人</small>
+                    {isSuperAdmin && <button className="secondary-button compact-button" onClick={() => openAccountCreator(group.role)}><UserPlus size={15} />新增{group.label}</button>}
+                  </div>
+                  <div className="table-wrap"><table><thead><tr><th>人员</th><th>部门 / 职位</th><th>联系方式</th><th>状态</th><th>操作</th></tr></thead>
+                  <tbody>{group.users.map((user) => (
+                    <tr key={user.id}>
+                      <td><div className="user-cell"><strong>{user.name}</strong><small>{user.studentId || `用户 #${user.id}`} · {user.email || "未绑定邮箱"}</small></div></td>
+                      <td><div className="user-cell"><strong>{departmentName(user.departmentId)}</strong><small>{user.position || "未填写职位"}</small></div></td>
+                      <td>{user.phone || "未填写"}</td>
+                      <td><span className={`status-badge ${user.isActive ? "confirmed" : "cancelled"}`}>{user.isActive ? "启用" : "已停用"}</span></td>
+                      <td className="action-cell"><button className="secondary-button compact-button" onClick={() => setUserEditor(user)}><Edit3 size={15} />编辑</button>{isSuperAdmin && <button className="secondary-button compact-button" onClick={() => { setAccountModalError(null); setResetPasswordUserId(user.id); }} disabled={submitting || user.id === profile?.id || !user.authUserId} title={user.id === profile?.id ? "不能重置当前登录的账号" : !user.authUserId ? "该账号未关联登录，无需重置密码" : undefined} aria-label={`重置 ${user.name} 的密码`}><KeyRound size={15} />重置密码</button>}{isSuperAdmin && <button className="danger-button compact-button" onClick={() => { setAccountModalError(null); setDeleteUserId(user.id); }} disabled={submitting || user.id === profile?.id} title={user.id === profile?.id ? "不能删除当前登录的账号" : undefined} aria-label={`删除 ${user.name}`}><Trash2 size={15} />删除</button>}</td>
+                    </tr>
+                  ))}</tbody></table>
+                  {isSuperAdmin && group.users.length === 0 && <div className="empty-state"><UsersRound size={27} /><strong>{group.label}暂无人员</strong><span>点击右上角「新增{group.label}」创建账号</span></div>}
+                  </div>
+                </div>
+              ))}
+              {!loading && visibleManagedUsers.length === 0 && !isSuperAdmin && <div className="empty-state"><UsersRound size={27} /><strong>暂无可管理人员</strong><span>人员由超级管理员统一导入和维护</span></div>}
             </section>
           </>
         ) : view === "borrows" ? (
@@ -1656,7 +1801,7 @@ function App() {
                 const status = borrowStatusMeta[order.status];
                 const borrower = managedUsers.find((user) => user.id === order.userId);
                 return <tr key={order.id}>
-                  <td><div className="user-cell"><strong>{order.orderNumber}</strong><small>借用提交：{formatDateTime(order.createdAt)}</small>{order.returnSubmittedAt && <small>归还提交：{formatDateTime(order.returnSubmittedAt)}</small>}</div></td>
+                  <td><div className="user-cell"><strong>{order.orderNumber}</strong><small>借用提交：{formatDateTime(order.createdAt)}</small>{order.returnSubmittedAt && <small>归还提交：{formatDateTime(order.returnSubmittedAt)}</small>}{order.status === "cancelled" && order.notes && <small>驳回理由：{order.notes}</small>}</div></td>
                   <td><div className="user-cell"><strong>{userName(order.userId)}</strong><small>{departmentName(order.departmentId)}</small>{borrower?.phone && <a href={`tel:${borrower.phone}`}>{borrower.phone}</a>}{order.returnDelegateId && <small>代还：{order.returnDelegateName} · {order.returnDelegateStudentId}</small>}</div></td>
                   <td>{activityName(order.activityId)}</td>
                   <td><div className="request-summary"><strong>{orderItemSummary(order.id)}</strong>{order.reason && <small>{order.reason}</small>}</div></td>
@@ -1669,14 +1814,14 @@ function App() {
           </>
         ) : view === "announcements" ? (
           <>
-            <div className="content-heading"><div><p className="eyebrow">系统通知</p><h1>公告管理</h1><p>发布会显示在对应角色工作台中的系统公告。</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button><button className="primary-button" onClick={() => setAnnouncementEditor("create")}><BellRing size={17} />发布公告</button></div></div>
-            <section className="inventory-panel"><div className="table-wrap"><table><thead><tr><th>标题</th><th>内容</th><th>目标角色</th><th>有效期</th><th>状态</th><th>操作</th></tr></thead><tbody>{announcements.map((announcement) => <tr key={announcement.id}><td><strong>{announcement.title}</strong></td><td><span className="request-summary">{announcement.content}</span></td><td>{announcement.target_role ? roleMeta[announcement.target_role] : "全部角色"}</td><td>{formatDateTime(announcement.starts_at)}<br />至 {announcement.ends_at ? formatDateTime(announcement.ends_at) : "长期"}</td><td><span className={`status-badge ${announcement.is_active ? "confirmed" : "cancelled"}`}>{announcement.is_active ? "已启用" : "已停用"}</span></td><td className="action-cell"><button className="secondary-button compact-button" onClick={() => setAnnouncementEditor(announcement)}><Edit3 size={15} />编辑</button><button className="danger-button compact-button" onClick={() => setDeleteAnnouncementId(announcement.id)}><Trash2 size={15} />删除</button></td></tr>)}</tbody></table>{!loading && announcements.length === 0 && <div className="empty-state"><BellRing size={27} /><strong>暂无公告</strong><span>发布第一条系统公告</span></div>}</div></section>
+            <div className="content-heading"><div><p className="eyebrow">系统通知</p><h1>公告管理</h1><p>发布会显示在对应角色工作台中的系统公告。</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button>{isSuperAdmin && <button className="primary-button" onClick={() => setAnnouncementEditor("create")}><BellRing size={17} />发布公告</button>}</div></div>
+            <section className="inventory-panel"><div className="table-wrap"><table><thead><tr><th>标题</th><th>内容</th><th>目标角色</th><th>有效期</th><th>状态</th><th>操作</th></tr></thead><tbody>{announcements.map((announcement) => <tr key={announcement.id}><td><strong>{announcement.title}</strong></td><td><span className="request-summary">{announcement.content}</span></td><td>{announcement.target_role ? roleMeta[announcement.target_role] : "全部角色"}</td><td>{formatDateTime(announcement.starts_at)}<br />至 {announcement.ends_at ? formatDateTime(announcement.ends_at) : "长期"}</td><td><span className={`status-badge ${announcement.is_active ? "confirmed" : "cancelled"}`}>{announcement.is_active ? "已启用" : "已停用"}</span></td><td className="action-cell">{isSuperAdmin && <><button className="secondary-button compact-button" onClick={() => setAnnouncementEditor(announcement)}><Edit3 size={15} />编辑</button><button className="danger-button compact-button" onClick={() => setDeleteAnnouncementId(announcement.id)}><Trash2 size={15} />删除</button></>}{!isSuperAdmin && <span className="muted-text">仅超级管理员可维护</span>}</td></tr>)}</tbody></table>{!loading && announcements.length === 0 && <div className="empty-state"><BellRing size={27} /><strong>暂无公告</strong><span>发布第一条系统公告</span></div>}</div></section>
           </>
         ) : view === "activities" ? (
           <>
             <div className="content-heading"><div><p className="eyebrow">活动与用途</p><h1>活动管理</h1><p>{isSuperAdmin ? "维护全校活动，借用订单可关联活动。" : `维护${departmentName(profile?.departmentId ?? null)}的活动。`}</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button><button className="primary-button" onClick={() => setActivityEditor({ mode: "create" })}><Plus size={17} />新增活动</button></div></div>
             <section className="activity-grid" aria-label="活动列表">
-              {activities.map((activity) => { const state = activityStatusMeta[activity.status]; const manageable = canManageActivity(activity); return <article className="activity-card" key={activity.id}><div className="activity-card-header"><div className="activity-icon"><CalendarRange size={19} /></div><div><h2>{activity.name}</h2><span>{activity.departmentId ? departmentName(activity.departmentId) : "全局活动"}</span></div><span className={`status-badge ${state.className}`}>{state.label}</span></div><p>{activity.description || "暂无活动说明"}</p><div className="activity-dates"><span>{activity.startDate || "未定开始"}</span><ChevronRight size={14} /><span>{activity.endDate || "未定结束"}</span></div>{manageable && <div className="department-actions"><button className="secondary-button compact-button" onClick={() => setActivityEditor({ mode: "edit", activity })}><Edit3 size={15} />编辑</button><button className="danger-button compact-button" onClick={() => setDeleteActivityId(activity.id)}><Trash2 size={15} />删除</button></div>}</article>; })}
+              {activities.map((activity) => { const state = activityStatusMeta[activity.status]; const manageable = canManageActivity(activity); return <article className="activity-card" key={activity.id}><div className="activity-card-header"><div className="activity-icon"><CalendarRange size={19} /></div><div><h2>{activity.name}{activity.autoApproveBorrows && <span className="status-badge overview activity-free-badge">免审</span>}</h2><span>{activity.departmentId ? departmentName(activity.departmentId) : "全局活动"}</span></div><span className={`status-badge ${state.className}`}>{state.label}</span></div><p>{activity.description || "暂无活动说明"}</p><div className="activity-dates"><span>{activity.startDate || "未定开始"}</span><ChevronRight size={14} /><span>{activity.endDate || "未定结束"}</span></div>{manageable && <div className="department-actions"><button className="secondary-button compact-button" onClick={() => setActivityEditor({ mode: "edit", activity })}><Edit3 size={15} />编辑</button><button className="danger-button compact-button" onClick={() => setDeleteActivityId(activity.id)}><Trash2 size={15} />删除</button></div>}</article>; })}
               {!loading && activities.length === 0 && <div className="empty-state"><CalendarRange size={27} /><strong>暂无活动</strong><span>创建活动后，用户借用时即可选择用途</span></div>}
             </section>
           </>
@@ -1755,6 +1900,7 @@ function App() {
               </div>
               {isSuperAdmin && <label><span>所属部门</span><select name="departmentId" defaultValue={activityEditor.activity?.departmentId ?? ""}><option value="">全局活动</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>}
               <label><span>状态</span><select name="status" defaultValue={activityEditor.activity?.status ?? "active"}>{Object.entries(activityStatusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
+              {isSuperAdmin && <label className="checkbox-label"><input type="checkbox" name="autoApproveBorrows" defaultChecked={activityEditor.activity?.autoApproveBorrows ?? false} /><span>该活动借用免审<small className="form-hint">勾选后，任何人关联此活动的借用单提交后直接借出，无需审批；归还仍需管理员验收。</small></span></label>}
               <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setActivityEditor(null)}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "保存中..." : "保存活动"}</button></div>
             </form>
           </section>
@@ -1798,6 +1944,63 @@ function App() {
         </div>
       )}
 
+      {accountCreatorOpen && (
+        <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setAccountCreatorOpen(false)}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="account-creator-title">
+            <header><div><p className="eyebrow">账户与权限</p><h2 id="account-creator-title">新增人员</h2></div><button className="icon-button" onClick={() => setAccountCreatorOpen(false)} aria-label="关闭"><X size={20} /></button></header>
+            <form onSubmit={handleAccountCreate}>
+              <div className="form-grid">
+                <label><span>姓名</span><input name="name" autoFocus required maxLength={80} /></label>
+                <label><span>学号 / 工号</span><input name="studentId" required maxLength={32} pattern="[a-zA-Z0-9_-]{2,32}" autoComplete="off" placeholder="例如 20231001" /></label>
+              </div>
+              <label><span>身份</span><select name="role" defaultValue={accountCreatorRole}>{ROLE_ORDER.map((role) => <option key={role} value={role}>{ROLE_GROUP_LABELS[role]}</option>)}</select></label>
+              <label><span>部门</span><input name="department" required maxLength={80} list="department-name-options" placeholder="选择现有部门或输入新部门名称" /><datalist id="department-name-options">{departments.map((department) => <option key={department.id} value={department.name} />)}</datalist></label>
+              <label><span>手机号</span><input name="phone" required maxLength={20} autoComplete="off" placeholder="11 位手机号" /></label>
+              <div className="form-grid">
+                <label><span>联系邮箱（可选）</span><input name="email" type="email" maxLength={254} /></label>
+                <label><span>职位（可选）</span><input name="position" maxLength={40} placeholder="部长、副部长、干事" /></label>
+              </div>
+              <label><span>备注（可选）</span><textarea name="notes" rows={3} maxLength={500} /></label>
+              <small className="form-hint">新账号初始密码为 513base123，首次登录时必须修改；部门不存在时会自动创建。</small>
+              {accountModalError && <div className="auth-message" role="alert">{accountModalError}</div>}
+              <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setAccountCreatorOpen(false)}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "创建中..." : "创建账号"}</button></div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {deleteUserId !== null && (() => {
+        const deleteUser = managedUsers.find((user) => user.id === deleteUserId);
+        if (!deleteUser) return null;
+        return (
+          <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setDeleteUserId(null)}>
+            <section className="modal" role="dialog" aria-modal="true" aria-labelledby="account-delete-title">
+              <header><div><p className="eyebrow">账户与权限</p><h2 id="account-delete-title">删除人员</h2></div><button className="icon-button" onClick={() => setDeleteUserId(null)} aria-label="关闭"><X size={20} /></button></header>
+              <p>确定删除 <strong>{deleteUser.name}</strong>（{deleteUser.studentId || `用户 #${deleteUser.id}`}，{roleMeta[deleteUser.role]}）？</p>
+              <p className="muted-text">删除会同时注销其登录账号，且不可恢复。有借用、归还或库存申请记录的人员无法删除，请改为在「编辑」中停用账号。</p>
+              {accountModalError && <div className="auth-message" role="alert">{accountModalError}</div>}
+              <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setDeleteUserId(null)}>取消</button><button type="button" className="danger-button" onClick={() => void handleAccountDelete()} disabled={submitting}>{submitting ? "删除中..." : "确认删除"}</button></div>
+            </section>
+          </div>
+        );
+      })()}
+
+      {resetPasswordUserId !== null && (() => {
+        const resetUser = managedUsers.find((user) => user.id === resetPasswordUserId);
+        if (!resetUser) return null;
+        return (
+          <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setResetPasswordUserId(null)}>
+            <section className="modal" role="dialog" aria-modal="true" aria-labelledby="password-reset-title">
+              <header><div><p className="eyebrow">账户与权限</p><h2 id="password-reset-title">重置密码</h2></div><button className="icon-button" onClick={() => setResetPasswordUserId(null)} aria-label="关闭"><X size={20} /></button></header>
+              <p>确定将 <strong>{resetUser.name}</strong>（{resetUser.studentId || `用户 #${resetUser.id}`}，{roleMeta[resetUser.role]}）的密码重置为初始密码？</p>
+              <p className="muted-text">重置后的初始密码为 513base123，该账号下次登录时会再次要求设置新密码。</p>
+              {accountModalError && <div className="auth-message" role="alert">{accountModalError}</div>}
+              <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setResetPasswordUserId(null)}>取消</button><button type="button" className="primary-button" onClick={() => void handlePasswordReset()} disabled={submitting}>{submitting ? "重置中..." : "确认重置"}</button></div>
+            </section>
+          </div>
+        );
+      })()}
+
       {borrowEditorOpen && (
         <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setBorrowEditorOpen(false)}>
           <section className="modal borrow-modal" role="dialog" aria-modal="true" aria-labelledby="borrow-editor-title">
@@ -1805,15 +2008,55 @@ function App() {
             <form onSubmit={handleBorrowSubmit}>
               <div className="borrow-selection-heading"><div><strong>本次借用物品</strong><span>共 {selectedItems.length} 种</span></div><button type="button" className="secondary-button compact-button" onClick={() => { setBorrowEditorOpen(false); setView("inventory"); }}><ListChecks size={14} />继续选择</button></div>
               <div className="borrow-selection-list">{selectedItems.map((item) => <div key={item.id} className="borrow-selection-row"><div><strong>{item.name}</strong><small>{item.id} · {locationLabel(item.locationCode)}</small></div><label><span>数量（可借 {availability.get(item.id)?.available_quantity ?? 0}）</span><input name={`quantity_${item.id}`} type="number" min={1} max={availability.get(item.id)?.available_quantity ?? 0} step={1} defaultValue={1} required /></label><button type="button" className="icon-button" onClick={() => toggleItemSelection(item.id)} aria-label={`移除 ${item.name}`} title="移除"><X size={16} /></button></div>)}</div>
-              <label><span>所属活动</span><select name="activityId" defaultValue=""><option value="">不关联活动</option>{activeActivities.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}{activity.departmentId ? ` · ${departmentName(activity.departmentId)}` : ""}</option>)}</select></label>
+              <label><span>所属活动</span><select name="activityId" defaultValue=""><option value="">不关联活动</option>{activeActivities.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}{activity.autoApproveBorrows ? "（免审）" : ""}{activity.departmentId ? ` · ${departmentName(activity.departmentId)}` : ""}</option>)}</select></label>
               <label><span>预计归还日期</span><input name="expectedReturnDate" type="date" min={new Date().toISOString().slice(0, 10)} required /></label>
               <label><span>借用理由</span><textarea name="reason" rows={3} required maxLength={300} placeholder="填写活动或工作用途" /></label>
               <label><span>备注</span><textarea name="notes" rows={2} maxLength={300} placeholder="可选" /></label>
+              {isSuperAdmin && <small className="form-hint">超级管理员借用免审核：提交后直接进入借出中，请确认数量无误，归还仍需管理员验收。</small>}
               <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setBorrowEditorOpen(false)}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "提交中..." : "提交借用申请"}</button></div>
             </form>
           </section>
         </div>
       )}
+
+      {borrowConfirmRequest && (
+        <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setBorrowConfirmRequest(null)}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="borrow-confirm-title">
+            <header><div><p className="eyebrow">库存借用</p><h2 id="borrow-confirm-title">确认借用信息</h2></div><button className="icon-button" onClick={() => setBorrowConfirmRequest(null)} aria-label="关闭"><X size={20} /></button></header>
+            <p>请核对本次借用的物品和数量，确认后提交：</p>
+            <div className="borrow-selection-list">{borrowConfirmRequest.items.map((line) => { const item = items.find((candidate) => candidate.id === line.item_id); return <div className="borrow-selection-row" key={line.item_id}><div><strong>{item?.name ?? line.item_id}</strong><small>{line.item_id}</small></div><span className="status-badge confirmed">数量 {line.quantity}</span></div>; })}</div>
+            {borrowConfirmError && <div className="page-error" role="alert"><CircleAlert size={17} /><span>{borrowConfirmError}</span></div>}
+            <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setBorrowConfirmRequest(null)}>返回修改</button><button type="button" className="primary-button" onClick={() => void submitBorrowRequest()} disabled={submitting}>{submitting ? "提交中..." : "确认提交"}</button></div>
+          </section>
+        </div>
+      )}
+
+      {borrowResultMessage && (
+        <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setBorrowResultMessage(null)}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="borrow-result-title">
+            <header><div><p className="eyebrow">库存借用</p><h2 id="borrow-result-title">借用单已提交</h2></div><button className="icon-button" onClick={() => setBorrowResultMessage(null)} aria-label="关闭"><X size={20} /></button></header>
+            <p>{borrowResultMessage}</p>
+            <div className="form-actions"><button type="button" className="primary-button" onClick={() => setBorrowResultMessage(null)}>知道了</button></div>
+          </section>
+        </div>
+      )}
+
+      {rejectOrderId !== null && (() => {
+        const rejectOrder = borrowOrders.find((order) => order.id === rejectOrderId);
+        if (!rejectOrder) return null;
+        return (
+          <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setRejectOrderId(null)}>
+            <section className="modal" role="dialog" aria-modal="true" aria-labelledby="borrow-reject-title">
+              <header><div><p className="eyebrow">借用审批</p><h2 id="borrow-reject-title">驳回借用申请</h2></div><button className="icon-button" onClick={() => setRejectOrderId(null)} aria-label="关闭"><X size={20} /></button></header>
+              <p>驳回 <strong>{rejectOrder.orderNumber}</strong>（{userName(rejectOrder.userId)}）的借用申请，驳回理由会显示在借用人的订单上。</p>
+              <form onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("rejectReason") ?? "").trim(); if (!reason) return; void updateBorrowStatus(rejectOrderId, "cancelled", reason); }}>
+                <label><span>驳回理由（必填）</span><textarea name="rejectReason" rows={3} required maxLength={300} placeholder="例如：活动调整，本周暂不外借" autoFocus /></label>
+                <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setRejectOrderId(null)}>取消</button><button type="submit" className="danger-button" disabled={submitting}>{submitting ? "提交中..." : "确认驳回"}</button></div>
+              </form>
+            </section>
+          </div>
+        );
+      })()}
 
       {locationCorrectionLineId !== null && <div className="modal-layer">
         <section className="modal" role="dialog" aria-modal="true" aria-labelledby="location-correction-title">

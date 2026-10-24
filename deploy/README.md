@@ -8,7 +8,23 @@
 
 1. 使用发布工作树 `/Users/love_zmyself/.codex/worktrees/513base-cloud/514base_hub`，不要从含有未提交实验改动的主工作区发布。
 2. 在 `.env.local` 中配置本项目 Supabase URL 和 publishable key。Vite 会把这两个浏览器变量编入静态资源；只允许使用 publishable key。`.env.local` 文件本身、服务端密钥和人员表不会作为文件上传。
-3. 目标 Supabase 项目应已完成基础 SQL、全部迁移和三个 Edge Functions；后续只部署尚未执行的新迁移，不能重跑基础脚本或 `seed.sql`。
+3. 目标 Supabase 项目应已完成基础 SQL、全部迁移和四个 Edge Functions（`student-login` / `import-accounts` / `change-initial-password` / `manage-accounts`）；后续只部署尚未执行的新迁移，不能重跑基础脚本或 `seed.sql`。
+
+## 数据库迁移与 Edge Functions
+
+生产库的迁移历史以云端 `supabase_migrations.schema_migrations` 为准。发布前先核对，再追加部署：
+
+```bash
+supabase link --project-ref <project-ref>
+supabase migration list          # 对比本地与云端已应用记录
+```
+
+- 只允许 append-only 部署：只应用 `migration list` 中显示为「本地有、云端未应用」且与审核 diff 一致的新迁移；禁止 `supabase db reset`、重放旧迁移、重跑基础 SQL 或 `seed.sql`。
+- 发布顺序：**数据库迁移 → Edge Functions → 静态站**。前端对后端为向前兼容（旧前端 + 新后端仅提示文案差异），反向组合可能出现新功能提示但后端未生效。
+- 迁移后验证：`supabase migration list` 全部显示「已应用」，并用 SQL Editor 抽查新结构（如 `activities.auto_approve_borrows` 列、`activities_guard_auto_approve` 触发器、`operation_logs` 中新审计行）。
+- Edge Functions 回退：重新部署旧版本函数即可（`supabase functions deploy <name>`），不需要回退数据库。
+- 数据库回退：迁移均为向前兼容式新增（加列、函数重定义、触发器），不为回滚前端而修改或删除数据；确需回退函数行为时，先在 SQL Editor 重放对应旧迁移中的函数定义，并等待负责人确认。
+- 生产发布前应确认存在可用的数据库备份/恢复点（Supabase Dashboard → Database → Backups），无法确认时不要执行生产迁移。
 4. 确认 DNS、备案、HTTPS 证书和 Nginx include 均属于 `lzmyselfai.cn` 的 `/513base/` 路径。
 
 ## 服务器布局
@@ -74,3 +90,5 @@ sudo /www/server/nginx/sbin/nginx -s reload
 - 真实手机需要额外验证摄像头、相册选择、拍照上传和移动网络；桌面浏览器通过不代表设备验收完成。
 
 最近一次生产验收和 release 记录见 [`HANDOFF.md`](../HANDOFF.md)。开发库初始化、迁移顺序和 SQL 回归见 [`docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md)。
+
+2026-10 发布新增：迁移 `20261024100000`（超管借用免审直借）、`20261024110000`（唯一超管自验归还 + 驳回必填理由）、`20261024120000`（活动免审字段与直借）、`20261025100000`（活动免审字段表级权限护栏），以及 Edge Function `manage-accounts`（超管单人增删账号与重置密码，`verify_jwt=false`，函数内自校验调用者身份）。审核与验证记录见 [`docs/ZCODE_CHANGE_REVIEW.md`](../docs/ZCODE_CHANGE_REVIEW.md) 与 [`docs/GPT_REVIEW_CHECKLIST.md`](../docs/GPT_REVIEW_CHECKLIST.md)。

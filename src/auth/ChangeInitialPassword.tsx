@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { Boxes, LockKeyhole, LogOut } from "lucide-react";
+import { LockKeyhole, LogOut } from "lucide-react";
 import { useAuth } from "./AuthProvider";
 import { accountFunctionError } from "./accountApi";
 import LegalFooter from "../components/LegalFooter";
@@ -37,7 +37,7 @@ export default function ChangeInitialPassword() {
 
   return <main className="auth-page">
     <section className="auth-panel" aria-labelledby="password-title">
-      <div className="auth-brand"><div className="brand-mark"><Boxes size={22} /></div><div><strong>513 仓库</strong><span>账户安全</span></div></div>
+      <div className="auth-brand"><img className="brand-mark" src={`${import.meta.env.BASE_URL}department-emblem.jpg`} alt="信息技术学部队徽" /><div><strong>信息技术学部</strong><span>仓库借用系统</span></div></div>
       <div className="auth-heading"><p className="eyebrow">首次登录</p><h1 id="password-title">设置新密码</h1><p>初始密码已到期，请设置个人密码。</p></div>
       <form className="auth-form" onSubmit={submit}>
         <label><span>新密码</span><div className="auth-input"><LockKeyhole size={17} /><input type="password" autoComplete="new-password" minLength={10} maxLength={128} placeholder="至少 10 位，含字母和数字" value={password} onChange={(event) => setPassword(event.target.value)} required /></div></label>

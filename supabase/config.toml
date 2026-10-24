@@ -6,5 +6,8 @@ verify_jwt = false
 [functions.import-accounts]
 verify_jwt = false
 
+[functions.manage-accounts]
+verify_jwt = false
+
 [functions.change-initial-password]
 verify_jwt = false

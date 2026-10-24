@@ -62,7 +62,7 @@ SELECT pg_temp.counted_reject('SELECT public.create_borrow_order_batch(''[{"item
 SELECT pg_temp.counted_assert((SELECT available_quantity = 1 FROM public.get_inventory_availability() WHERE item_id = 'ITEM9902'), 'Failed batch rolls back whole reservation');
 
 SELECT pg_temp.counted_actor('admin');
-SELECT public.update_borrow_order_status(id, 'cancelled') FROM counted_test_state WHERE label = 'second';
+SELECT public.update_borrow_order_status(id, 'cancelled', 'counted test cancellation') FROM counted_test_state WHERE label = 'second';
 SELECT public.update_borrow_order_status(id, 'borrowed') FROM counted_test_state WHERE label = 'first';
 SELECT pg_temp.counted_assert((SELECT available_quantity = 80 AND reserved_quantity = 20
  FROM public.get_inventory_availability() WHERE item_id = 'ITEM9901'), 'Rejection releases stock; approval does not double reserve');
