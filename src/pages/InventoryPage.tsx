@@ -1166,7 +1166,9 @@ function App() {
       setError(createError.message);
       return;
     }
-    setNotice("借用申请已提交，等待管理员审批。");
+    setNotice(isSuperAdmin
+      ? "超级管理员借用免审核，已直接借出。请按期归还并提交归还申请。"
+      : "借用申请已提交，等待管理员审批。");
     setBorrowEditorOpen(false);
     setSelectedItemIds(new Set());
     setView("borrows");
@@ -1965,6 +1967,7 @@ function App() {
               <label><span>预计归还日期</span><input name="expectedReturnDate" type="date" min={new Date().toISOString().slice(0, 10)} required /></label>
               <label><span>借用理由</span><textarea name="reason" rows={3} required maxLength={300} placeholder="填写活动或工作用途" /></label>
               <label><span>备注</span><textarea name="notes" rows={2} maxLength={300} placeholder="可选" /></label>
+              {isSuperAdmin && <small className="form-hint">超级管理员借用免审核：提交后直接进入借出中，请确认数量无误，归还仍需管理员验收。</small>}
               <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setBorrowEditorOpen(false)}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "提交中..." : "提交借用申请"}</button></div>
             </form>
           </section>
