@@ -166,7 +166,7 @@ export default function RoleDashboard() {
         { label: "库存管理", detail: "新增、编辑和查看物品", view: "inventory" as const, icon: Box },
         { label: "审批中心", detail: "处理库存和借用请求", view: "requests" as const, icon: FileCheck2 },
         { label: "借用监管", detail: "查看全部借用订单", view: "borrows" as const, icon: PackageCheck },
-        { label: "人员管理", detail: "角色、部门和状态", view: "users" as const, icon: UsersRound },
+        { label: "人员管理", detail: "按身份增删人员、调整角色部门", view: "users" as const, icon: UsersRound },
         { label: "公告管理", detail: "发布系统通知", view: "announcements" as const, icon: BellRing },
       ]
     : role === "admin"

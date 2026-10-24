@@ -31,16 +31,19 @@ import {
   Search,
   Send,
   Trash2,
+  UserPlus,
   UsersRound,
   X,
 } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import { accountFunctionError } from "../auth/accountApi";
 import { locationLabel, locations, parseLocationQr } from "../locations";
 import type { IScannerControls } from "@zxing/browser";
 import DeveloperContact from "../components/DeveloperContact";
 import LegalFooter from "../components/LegalFooter";
 import AccountImport from "../components/AccountImport";
+import { ROLE_GROUP_LABELS, ROLE_ORDER, accountFormError, groupUsersByRole, normalizeAccountInput } from "../lib/accountAdmin";
 import { assetUrl } from "../lib/assetUrl";
 import { prepareInventoryImage } from "../lib/imageUpload";
 import { IMAGE_EXTENSIONS, storageFileName } from "../lib/storageFileName";
@@ -415,6 +418,12 @@ const roleMeta: Record<UserRole, string> = {
   member: "普通用户",
 };
 
+const userGroupBadgeClass: Record<UserRole, string> = {
+  super_admin: "overview",
+  admin: "borrowed",
+  member: "confirmed",
+};
+
 const borrowStatusMeta: Record<BorrowOrderStatus, { label: string; className: string }> = {
   pending: { label: "待审批", className: "pending" },
   approved: { label: "已批准", className: "overview" },
@@ -503,6 +512,10 @@ function App() {
   const [departmentEditor, setDepartmentEditor] = useState<{ mode: EditorMode; department?: Department } | null>(null);
   const [deleteDepartmentId, setDeleteDepartmentId] = useState<number | null>(null);
   const [userEditor, setUserEditor] = useState<ManagedUser | null>(null);
+  const [accountCreatorOpen, setAccountCreatorOpen] = useState(false);
+  const [accountCreatorRole, setAccountCreatorRole] = useState<UserRole>("member");
+  const [accountModalError, setAccountModalError] = useState<string | null>(null);
+  const [deleteUserId, setDeleteUserId] = useState<number | null>(null);
   const [borrowEditorOpen, setBorrowEditorOpen] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [activityEditor, setActivityEditor] = useState<{ mode: EditorMode; activity?: Activity } | null>(null);
@@ -1048,6 +1061,63 @@ function App() {
     setNotice("人员资料已更新。");
     setUserEditor(null);
     await loadData();
+  };
+
+  const openAccountCreator = (role: UserRole) => {
+    setAccountModalError(null);
+    setAccountCreatorRole(role);
+    setAccountCreatorOpen(true);
+  };
+
+  const handleAccountCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!client || !isSuperAdmin) return;
+    const form = new FormData(event.currentTarget);
+    const input = normalizeAccountInput({
+      studentId: String(form.get("studentId") ?? ""),
+      name: String(form.get("name") ?? ""),
+      department: String(form.get("department") ?? ""),
+      phone: String(form.get("phone") ?? ""),
+      role: String(form.get("role") ?? ""),
+      email: String(form.get("email") ?? ""),
+      position: String(form.get("position") ?? ""),
+      notes: String(form.get("notes") ?? ""),
+    });
+    const validationError = accountFormError(input);
+    if (validationError) {
+      setAccountModalError(validationError);
+      return;
+    }
+    setSubmitting(true);
+    setAccountModalError(null);
+    try {
+      const { data, error } = await client.functions.invoke("manage-accounts", { body: { action: "create", account: input } });
+      if (error || !data?.success) throw new Error(await accountFunctionError(error, data?.error || "账号创建失败，请稍后重试。"));
+      setNotice(`已创建 ${roleMeta[input.role as UserRole]}账号 ${input.name}（${input.studentId}），初始密码 513base123，首次登录须修改。`);
+      setAccountCreatorOpen(false);
+      await loadData();
+    } catch (createError) {
+      setAccountModalError(errorMessage(createError));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAccountDelete = async () => {
+    if (!client || !isSuperAdmin || deleteUserId === null) return;
+    setSubmitting(true);
+    setAccountModalError(null);
+    try {
+      const { data, error } = await client.functions.invoke("manage-accounts", { body: { action: "delete", userId: deleteUserId } });
+      if (error || !data?.success) throw new Error(await accountFunctionError(error, data?.error || "删除失败，请稍后重试。"));
+      setNotice("人员及其登录账号已删除。");
+      setDeleteUserId(null);
+      await loadData();
+    } catch (deleteError) {
+      setAccountModalError(errorMessage(deleteError));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleBorrowSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1631,19 +1701,30 @@ function App() {
           </>
         ) : view === "users" ? (
           <>
-            <div className="content-heading"><div><p className="eyebrow">账户与权限</p><h1>人员管理</h1><p>{isSuperAdmin ? "超级管理员可调整角色、部门与启用状态。" : `仅显示${departmentName(profile?.departmentId ?? null)}的普通用户，可维护人员资料。`}</p></div><div className="heading-actions">{isSuperAdmin && <AccountImport onImported={loadData} />}<button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button></div></div>
+            <div className="content-heading"><div><p className="eyebrow">账户与权限</p><h1>人员管理</h1><p>{isSuperAdmin ? "超级管理员可按身份分组新增、删除人员，并调整角色、部门与启用状态。" : `仅显示${departmentName(profile?.departmentId ?? null)}的普通用户，可维护人员资料。`}</p></div><div className="heading-actions">{isSuperAdmin && <button className="primary-button" onClick={() => openAccountCreator("member")}><UserPlus size={17} />新增人员</button>}{isSuperAdmin && <AccountImport onImported={loadData} />}<button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button></div></div>
             <section className="inventory-panel user-panel">
-              <div className="table-wrap"><table><thead><tr><th>人员</th><th>角色</th><th>部门 / 职位</th><th>联系方式</th><th>状态</th><th>操作</th></tr></thead>
-              <tbody>{visibleManagedUsers.map((user) => (
-                <tr key={user.id}>
-                  <td><div className="user-cell"><strong>{user.name}</strong><small>{user.studentId || `用户 #${user.id}`} · {user.email || "未绑定邮箱"}</small></div></td>
-                  <td><span className={`status-badge ${user.role === "super_admin" ? "overview" : user.role === "admin" ? "borrowed" : "confirmed"}`}>{roleMeta[user.role]}</span></td>
-                  <td><div className="user-cell"><strong>{departmentName(user.departmentId)}</strong><small>{user.position || "未填写职位"}</small></div></td>
-                  <td>{user.phone || "未填写"}</td>
-                  <td><span className={`status-badge ${user.isActive ? "confirmed" : "cancelled"}`}>{user.isActive ? "启用" : "已停用"}</span></td>
-                  <td className="action-cell"><button className="secondary-button compact-button" onClick={() => setUserEditor(user)}><Edit3 size={15} />编辑</button></td>
-                </tr>
-              ))}</tbody></table>{!loading && visibleManagedUsers.length === 0 && <div className="empty-state"><UsersRound size={27} /><strong>暂无可管理人员</strong><span>先在 Supabase Auth 创建账号，再关联用户资料</span></div>}</div>
+              {groupUsersByRole(visibleManagedUsers).filter((group) => isSuperAdmin || group.users.length > 0).map((group) => (
+                <div className="user-group" key={group.role}>
+                  <div className="user-group-heading">
+                    <span className={`status-badge ${userGroupBadgeClass[group.role]}`}>{group.label}</span>
+                    <small>{group.users.length} 人</small>
+                    {isSuperAdmin && <button className="secondary-button compact-button" onClick={() => openAccountCreator(group.role)}><UserPlus size={15} />新增{group.label}</button>}
+                  </div>
+                  <div className="table-wrap"><table><thead><tr><th>人员</th><th>部门 / 职位</th><th>联系方式</th><th>状态</th><th>操作</th></tr></thead>
+                  <tbody>{group.users.map((user) => (
+                    <tr key={user.id}>
+                      <td><div className="user-cell"><strong>{user.name}</strong><small>{user.studentId || `用户 #${user.id}`} · {user.email || "未绑定邮箱"}</small></div></td>
+                      <td><div className="user-cell"><strong>{departmentName(user.departmentId)}</strong><small>{user.position || "未填写职位"}</small></div></td>
+                      <td>{user.phone || "未填写"}</td>
+                      <td><span className={`status-badge ${user.isActive ? "confirmed" : "cancelled"}`}>{user.isActive ? "启用" : "已停用"}</span></td>
+                      <td className="action-cell"><button className="secondary-button compact-button" onClick={() => setUserEditor(user)}><Edit3 size={15} />编辑</button>{isSuperAdmin && <button className="danger-button compact-button" onClick={() => { setAccountModalError(null); setDeleteUserId(user.id); }} disabled={submitting || user.id === profile?.id} title={user.id === profile?.id ? "不能删除当前登录的账号" : undefined} aria-label={`删除 ${user.name}`}><Trash2 size={15} />删除</button>}</td>
+                    </tr>
+                  ))}</tbody></table>
+                  {isSuperAdmin && group.users.length === 0 && <div className="empty-state"><UsersRound size={27} /><strong>{group.label}暂无人员</strong><span>点击右上角「新增{group.label}」创建账号</span></div>}
+                  </div>
+                </div>
+              ))}
+              {!loading && visibleManagedUsers.length === 0 && !isSuperAdmin && <div className="empty-state"><UsersRound size={27} /><strong>暂无可管理人员</strong><span>人员由超级管理员统一导入和维护</span></div>}
             </section>
           </>
         ) : view === "borrows" ? (
@@ -1797,6 +1878,47 @@ function App() {
           </section>
         </div>
       )}
+
+      {accountCreatorOpen && (
+        <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setAccountCreatorOpen(false)}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="account-creator-title">
+            <header><div><p className="eyebrow">账户与权限</p><h2 id="account-creator-title">新增人员</h2></div><button className="icon-button" onClick={() => setAccountCreatorOpen(false)} aria-label="关闭"><X size={20} /></button></header>
+            <form onSubmit={handleAccountCreate}>
+              <div className="form-grid">
+                <label><span>姓名</span><input name="name" autoFocus required maxLength={80} /></label>
+                <label><span>学号 / 工号</span><input name="studentId" required maxLength={32} pattern="[a-zA-Z0-9_-]{2,32}" autoComplete="off" placeholder="例如 20231001" /></label>
+              </div>
+              <label><span>身份</span><select name="role" defaultValue={accountCreatorRole}>{ROLE_ORDER.map((role) => <option key={role} value={role}>{ROLE_GROUP_LABELS[role]}</option>)}</select></label>
+              <label><span>部门</span><input name="department" required maxLength={80} list="department-name-options" placeholder="选择现有部门或输入新部门名称" /><datalist id="department-name-options">{departments.map((department) => <option key={department.id} value={department.name} />)}</datalist></label>
+              <label><span>手机号</span><input name="phone" required maxLength={20} autoComplete="off" placeholder="11 位手机号" /></label>
+              <div className="form-grid">
+                <label><span>联系邮箱（可选）</span><input name="email" type="email" maxLength={254} /></label>
+                <label><span>职位（可选）</span><input name="position" maxLength={40} placeholder="部长、副部长、干事" /></label>
+              </div>
+              <label><span>备注（可选）</span><textarea name="notes" rows={3} maxLength={500} /></label>
+              <small className="form-hint">新账号初始密码为 513base123，首次登录时必须修改；部门不存在时会自动创建。</small>
+              {accountModalError && <div className="auth-message" role="alert">{accountModalError}</div>}
+              <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setAccountCreatorOpen(false)}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "创建中..." : "创建账号"}</button></div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {deleteUserId !== null && (() => {
+        const deleteUser = managedUsers.find((user) => user.id === deleteUserId);
+        if (!deleteUser) return null;
+        return (
+          <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setDeleteUserId(null)}>
+            <section className="modal" role="dialog" aria-modal="true" aria-labelledby="account-delete-title">
+              <header><div><p className="eyebrow">账户与权限</p><h2 id="account-delete-title">删除人员</h2></div><button className="icon-button" onClick={() => setDeleteUserId(null)} aria-label="关闭"><X size={20} /></button></header>
+              <p>确定删除 <strong>{deleteUser.name}</strong>（{deleteUser.studentId || `用户 #${deleteUser.id}`}，{roleMeta[deleteUser.role]}）？</p>
+              <p className="muted-text">删除会同时注销其登录账号，且不可恢复。有借用、归还或库存申请记录的人员无法删除，请改为在「编辑」中停用账号。</p>
+              {accountModalError && <div className="auth-message" role="alert">{accountModalError}</div>}
+              <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setDeleteUserId(null)}>取消</button><button type="button" className="danger-button" onClick={() => void handleAccountDelete()} disabled={submitting}>{submitting ? "删除中..." : "确认删除"}</button></div>
+            </section>
+          </div>
+        );
+      })()}
 
       {borrowEditorOpen && (
         <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setBorrowEditorOpen(false)}>
