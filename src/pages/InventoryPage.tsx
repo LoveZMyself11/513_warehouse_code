@@ -127,6 +127,7 @@ interface DbActivityRow {
   status: ActivityStatus;
   start_date: string | null;
   end_date: string | null;
+  auto_approve_borrows: boolean;
   created_by: number | null;
   created_at: string;
   updated_at: string;
@@ -354,6 +355,7 @@ const mapActivity = (row: DbActivityRow): Activity => ({
   status: row.status,
   startDate: row.start_date,
   endDate: row.end_date,
+  autoApproveBorrows: row.auto_approve_borrows,
   createdBy: row.created_by,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -519,6 +521,16 @@ function App() {
   const [deleteUserId, setDeleteUserId] = useState<number | null>(null);
   const [resetPasswordUserId, setResetPasswordUserId] = useState<number | null>(null);
   const [borrowEditorOpen, setBorrowEditorOpen] = useState(false);
+  const [borrowConfirmRequest, setBorrowConfirmRequest] = useState<{
+    items: Array<{ item_id: string; quantity: number }>;
+    reason: string;
+    expectedReturnDate: string;
+    notes: string | null;
+    activityId: number | null;
+  } | null>(null);
+  const [borrowConfirmError, setBorrowConfirmError] = useState<string | null>(null);
+  const [borrowResultMessage, setBorrowResultMessage] = useState<string | null>(null);
+  const [rejectOrderId, setRejectOrderId] = useState<number | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [activityEditor, setActivityEditor] = useState<{ mode: EditorMode; activity?: Activity } | null>(null);
   const [announcementEditor, setAnnouncementEditor] = useState<DbAnnouncementRow | "create" | null>(null);
@@ -569,7 +581,7 @@ function App() {
       client.from("inventory_location_history").select("*").order("moved_at", { ascending: false }),
       client.from("inventory_change_requests").select("*").order("created_at", { ascending: false }),
       client.from("departments").select("id, name, description, created_at").order("name"),
-      client.from("activities").select("id, name, description, department_id, status, start_date, end_date, created_by, created_at, updated_at").order("created_at", { ascending: false }),
+      client.from("activities").select("id, name, description, department_id, status, start_date, end_date, auto_approve_borrows, created_by, created_at, updated_at").order("created_at", { ascending: false }),
       client.from("users").select("id, student_id, name, department_id, phone, email, position, notes, role, is_active, auth_user_id, created_at").order("name"),
       client.from("borrow_orders").select("*").order("created_at", { ascending: false }),
       client.from("borrow_items").select("*").order("id"),
@@ -1151,28 +1163,56 @@ function App() {
       setError("申请数量必须为正整数，且不能超过当前可借数量。请刷新库存后重试。");
       return;
     }
+    setBorrowConfirmError(null);
+    setBorrowConfirmRequest({
+      items: requestItems,
+      reason: String(form.get("reason") ?? "").trim(),
+      expectedReturnDate: String(form.get("expectedReturnDate") ?? ""),
+      notes: String(form.get("notes") ?? "").trim() || null,
+      activityId: String(form.get("activityId") ?? "") ? Number(form.get("activityId")) : null,
+    });
+  };
+
+  const submitBorrowRequest = async () => {
+    if (!client || !profile || !borrowConfirmRequest) return;
     setSubmitting(true);
+    setBorrowConfirmError(null);
     setError(null);
     setNotice(null);
-    const { error: createError } = await client.rpc("create_borrow_order_batch", {
-      p_items: requestItems,
-      p_reason: String(form.get("reason") ?? "").trim(),
-      p_expected_return_date: String(form.get("expectedReturnDate") ?? ""),
-      p_notes: String(form.get("notes") ?? "").trim() || null,
-      p_activity_id: String(form.get("activityId") ?? "") ? Number(form.get("activityId")) : null,
-    });
-    setSubmitting(false);
-    if (createError) {
-      setError(createError.message);
-      return;
+    try {
+      const { error: createError } = await client.rpc("create_borrow_order_batch", {
+        p_items: borrowConfirmRequest.items,
+        p_reason: borrowConfirmRequest.reason,
+        p_expected_return_date: borrowConfirmRequest.expectedReturnDate,
+        p_notes: borrowConfirmRequest.notes,
+        p_activity_id: borrowConfirmRequest.activityId,
+      });
+      if (createError) throw new Error(createError.message);
+      const linkedActivity = borrowConfirmRequest.activityId
+        ? activeActivities.find((activity) => activity.id === borrowConfirmRequest.activityId)
+        : undefined;
+      let message: string;
+      if (linkedActivity?.autoApproveBorrows) {
+        message = `借用单已提交并直接借出（「${linkedActivity.name}」活动免审），请按期归还并提交归还申请。`;
+      } else if (isSuperAdmin) {
+        message = "借用单已提交并直接借出（超级管理员免审），请按期归还并提交归还申请。";
+      } else if (isAdmin) {
+        message = "借用申请已提交，请联系：主席团。";
+      } else {
+        message = "借用申请已提交，请联系：本部门管理员。";
+      }
+      setBorrowResultMessage(message);
+      setNotice("借用申请已提交。");
+      setBorrowConfirmRequest(null);
+      setBorrowEditorOpen(false);
+      setSelectedItemIds(new Set());
+      setView("borrows");
+      await loadData();
+    } catch (submitError) {
+      setBorrowConfirmError(errorMessage(submitError));
+    } finally {
+      setSubmitting(false);
     }
-    setNotice(isSuperAdmin
-      ? "超级管理员借用免审核，已直接借出。请按期归还并提交归还申请。"
-      : "借用申请已提交，等待管理员审批。");
-    setBorrowEditorOpen(false);
-    setSelectedItemIds(new Set());
-    setView("borrows");
-    await loadData();
   };
 
   const handleReturnPhotoSelection = (borrowItemId: number, event: ChangeEvent<HTMLInputElement>) => {
@@ -1395,8 +1435,8 @@ function App() {
     if (canReview && nextBorrowStatuses(order.status).length) return <div className="borrow-action-stack">
       {borrowItems.some((line) => line.order_id === order.id && !isPhysicalLocation(items.find((item) => item.id === line.item_id)?.locationCode ?? ""))
         ? <span className="muted-text">请先确认物品层位</span>
-        : <button className="secondary-button compact-button" onClick={() => void updateBorrowStatus(order.id, "borrowed")} disabled={submitting}><Check size={14} />批准并借出</button>}
-      <button className="icon-button reject" onClick={() => void updateBorrowStatus(order.id, "cancelled")} disabled={submitting} title="拒绝借用" aria-label="拒绝借用"><Ban size={16} /></button>
+        : <button className="secondary-button compact-button" onClick={() => void updateBorrowStatus(order.id, "borrowed")} disabled={submitting}><Check size={14} />确认借出</button>}
+      <button className="danger-button compact-button" onClick={() => setRejectOrderId(order.id)} disabled={submitting}><Ban size={14} />驳回</button>
     </div>;
     return <span className="muted-text">{["returned", "cancelled"].includes(order.status) ? "已完成" : "等待管理员"}</span>;
   };
@@ -1439,7 +1479,7 @@ function App() {
     }
   };
 
-  const updateBorrowStatus = async (orderId: number, status: BorrowOrderStatus) => {
+  const updateBorrowStatus = async (orderId: number, status: BorrowOrderStatus, notes: string | null = null) => {
     if (!client || (!isSuperAdmin && !isAdmin)) return;
     setSubmitting(true);
     setError(null);
@@ -1447,14 +1487,15 @@ function App() {
     const { error: updateError } = await client.rpc("update_borrow_order_status", {
       p_order_id: orderId,
       p_status: status,
-      p_notes: null,
+      p_notes: notes,
     });
     setSubmitting(false);
     if (updateError) {
       setError(updateError.message);
       return;
     }
-    setNotice("借用订单状态已更新。");
+    setNotice(status === "cancelled" ? "借用申请已驳回，驳回理由已同步给借用人。" : "借用订单已确认借出。");
+    setRejectOrderId(null);
     await loadData();
   };
 
@@ -1518,7 +1559,7 @@ function App() {
     setSubmitting(true);
     setError(null);
     setNotice(null);
-    const payload = {
+    const payload: Record<string, unknown> = {
       name,
       description: description || null,
       department_id: departmentId,
@@ -1526,6 +1567,7 @@ function App() {
       start_date: startDate,
       end_date: endDate,
     };
+    if (isSuperAdmin) payload.auto_approve_borrows = form.get("autoApproveBorrows") === "on";
     const result = activityEditor.mode === "create"
       ? await client.from("activities").insert({ ...payload, created_by: profile.id })
       : await client.from("activities").update(payload).eq("id", activityEditor.activity!.id);
@@ -1613,7 +1655,7 @@ function App() {
         <button className="icon-button mobile-menu" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? "关闭位置导航" : "打开位置导航"} aria-expanded={mobileNavOpen} aria-controls="warehouse-navigation" title="位置导航"><Menu size={20} /></button>
         <div className="brand-mark"><Boxes size={20} /></div>
         <div className="brand-copy"><strong>513 仓库</strong><span>物品管理台</span></div>
-        <div className="topbar-summary"><span><Box size={16} /> {items.length} 件物品</span>{profile?.role === "member" ? <><span><PackageCheck size={16} /> {memberBorrowActionCount} 个借用流程</span><span><RotateCcw size={16} /> {outstandingBorrowItemCount} 件未归还</span></> : <><span><ClipboardList size={16} /> {pendingRequestCount} 个待审批</span><span><PackageCheck size={16} /> {pendingBorrowCount} 个借用待处理</span></>}</div>
+        <div className="topbar-summary"><span><Box size={16} /> {items.length} 件物品</span>{profile?.role === "member" ? <><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="查看借用状态"><PackageCheck size={16} /> {memberBorrowActionCount} 个借用流程</button><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="查看未归还物品"><RotateCcw size={16} /> {outstandingBorrowItemCount} 件未归还</button></> : <><button type="button" className="topbar-stat" onClick={() => setView("requests")} title="前往物品审批"><ClipboardList size={16} /> {pendingRequestCount} 个待审批</button><button type="button" className="topbar-stat" onClick={() => setView("borrows")} title="前往借用审批"><PackageCheck size={16} /> {pendingBorrowCount} 个借用待处理</button></>}</div>
         <span className="account-email" title={session?.user.email}>{profile?.name} · {profile?.role}</span>
         <button className="icon-button sign-out-button" onClick={() => client?.auth.signOut()} aria-label="退出登录" title="退出登录"><LogOut size={18} /></button>
         <button className="primary-button" onClick={() => { setView("inventory"); if (selectedItems.length) openBorrowEditor(); else setEditor({ mode: "create" }); }}>{selectedItems.length ? <ListChecks size={18} /> : <PackagePlus size={18} />}<span>{selectedItems.length ? "填写借用单" : "申请新增"}</span></button>
@@ -1757,7 +1799,7 @@ function App() {
                 const status = borrowStatusMeta[order.status];
                 const borrower = managedUsers.find((user) => user.id === order.userId);
                 return <tr key={order.id}>
-                  <td><div className="user-cell"><strong>{order.orderNumber}</strong><small>借用提交：{formatDateTime(order.createdAt)}</small>{order.returnSubmittedAt && <small>归还提交：{formatDateTime(order.returnSubmittedAt)}</small>}</div></td>
+                  <td><div className="user-cell"><strong>{order.orderNumber}</strong><small>借用提交：{formatDateTime(order.createdAt)}</small>{order.returnSubmittedAt && <small>归还提交：{formatDateTime(order.returnSubmittedAt)}</small>}{order.status === "cancelled" && order.notes && <small>驳回理由：{order.notes}</small>}</div></td>
                   <td><div className="user-cell"><strong>{userName(order.userId)}</strong><small>{departmentName(order.departmentId)}</small>{borrower?.phone && <a href={`tel:${borrower.phone}`}>{borrower.phone}</a>}{order.returnDelegateId && <small>代还：{order.returnDelegateName} · {order.returnDelegateStudentId}</small>}</div></td>
                   <td>{activityName(order.activityId)}</td>
                   <td><div className="request-summary"><strong>{orderItemSummary(order.id)}</strong>{order.reason && <small>{order.reason}</small>}</div></td>
@@ -1777,7 +1819,7 @@ function App() {
           <>
             <div className="content-heading"><div><p className="eyebrow">活动与用途</p><h1>活动管理</h1><p>{isSuperAdmin ? "维护全校活动，借用订单可关联活动。" : `维护${departmentName(profile?.departmentId ?? null)}的活动。`}</p></div><div className="heading-actions"><button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={17} />刷新</button><button className="primary-button" onClick={() => setActivityEditor({ mode: "create" })}><Plus size={17} />新增活动</button></div></div>
             <section className="activity-grid" aria-label="活动列表">
-              {activities.map((activity) => { const state = activityStatusMeta[activity.status]; const manageable = canManageActivity(activity); return <article className="activity-card" key={activity.id}><div className="activity-card-header"><div className="activity-icon"><CalendarRange size={19} /></div><div><h2>{activity.name}</h2><span>{activity.departmentId ? departmentName(activity.departmentId) : "全局活动"}</span></div><span className={`status-badge ${state.className}`}>{state.label}</span></div><p>{activity.description || "暂无活动说明"}</p><div className="activity-dates"><span>{activity.startDate || "未定开始"}</span><ChevronRight size={14} /><span>{activity.endDate || "未定结束"}</span></div>{manageable && <div className="department-actions"><button className="secondary-button compact-button" onClick={() => setActivityEditor({ mode: "edit", activity })}><Edit3 size={15} />编辑</button><button className="danger-button compact-button" onClick={() => setDeleteActivityId(activity.id)}><Trash2 size={15} />删除</button></div>}</article>; })}
+              {activities.map((activity) => { const state = activityStatusMeta[activity.status]; const manageable = canManageActivity(activity); return <article className="activity-card" key={activity.id}><div className="activity-card-header"><div className="activity-icon"><CalendarRange size={19} /></div><div><h2>{activity.name}{activity.autoApproveBorrows && <span className="status-badge overview activity-free-badge">免审</span>}</h2><span>{activity.departmentId ? departmentName(activity.departmentId) : "全局活动"}</span></div><span className={`status-badge ${state.className}`}>{state.label}</span></div><p>{activity.description || "暂无活动说明"}</p><div className="activity-dates"><span>{activity.startDate || "未定开始"}</span><ChevronRight size={14} /><span>{activity.endDate || "未定结束"}</span></div>{manageable && <div className="department-actions"><button className="secondary-button compact-button" onClick={() => setActivityEditor({ mode: "edit", activity })}><Edit3 size={15} />编辑</button><button className="danger-button compact-button" onClick={() => setDeleteActivityId(activity.id)}><Trash2 size={15} />删除</button></div>}</article>; })}
               {!loading && activities.length === 0 && <div className="empty-state"><CalendarRange size={27} /><strong>暂无活动</strong><span>创建活动后，用户借用时即可选择用途</span></div>}
             </section>
           </>
@@ -1856,6 +1898,7 @@ function App() {
               </div>
               {isSuperAdmin && <label><span>所属部门</span><select name="departmentId" defaultValue={activityEditor.activity?.departmentId ?? ""}><option value="">全局活动</option>{departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>}
               <label><span>状态</span><select name="status" defaultValue={activityEditor.activity?.status ?? "active"}>{Object.entries(activityStatusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}</select></label>
+              {isSuperAdmin && <label className="checkbox-label"><input type="checkbox" name="autoApproveBorrows" defaultChecked={activityEditor.activity?.autoApproveBorrows ?? false} /><span>该活动借用免审<small className="form-hint">勾选后，任何人关联此活动的借用单提交后直接借出，无需审批；归还仍需管理员验收。</small></span></label>}
               <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setActivityEditor(null)}>取消</button><button type="submit" className="primary-button" disabled={submitting}>{submitting ? "保存中..." : "保存活动"}</button></div>
             </form>
           </section>
@@ -1963,7 +2006,7 @@ function App() {
             <form onSubmit={handleBorrowSubmit}>
               <div className="borrow-selection-heading"><div><strong>本次借用物品</strong><span>共 {selectedItems.length} 种</span></div><button type="button" className="secondary-button compact-button" onClick={() => { setBorrowEditorOpen(false); setView("inventory"); }}><ListChecks size={14} />继续选择</button></div>
               <div className="borrow-selection-list">{selectedItems.map((item) => <div key={item.id} className="borrow-selection-row"><div><strong>{item.name}</strong><small>{item.id} · {locationLabel(item.locationCode)}</small></div><label><span>数量（可借 {availability.get(item.id)?.available_quantity ?? 0}）</span><input name={`quantity_${item.id}`} type="number" min={1} max={availability.get(item.id)?.available_quantity ?? 0} step={1} defaultValue={1} required /></label><button type="button" className="icon-button" onClick={() => toggleItemSelection(item.id)} aria-label={`移除 ${item.name}`} title="移除"><X size={16} /></button></div>)}</div>
-              <label><span>所属活动</span><select name="activityId" defaultValue=""><option value="">不关联活动</option>{activeActivities.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}{activity.departmentId ? ` · ${departmentName(activity.departmentId)}` : ""}</option>)}</select></label>
+              <label><span>所属活动</span><select name="activityId" defaultValue=""><option value="">不关联活动</option>{activeActivities.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}{activity.autoApproveBorrows ? "（免审）" : ""}{activity.departmentId ? ` · ${departmentName(activity.departmentId)}` : ""}</option>)}</select></label>
               <label><span>预计归还日期</span><input name="expectedReturnDate" type="date" min={new Date().toISOString().slice(0, 10)} required /></label>
               <label><span>借用理由</span><textarea name="reason" rows={3} required maxLength={300} placeholder="填写活动或工作用途" /></label>
               <label><span>备注</span><textarea name="notes" rows={2} maxLength={300} placeholder="可选" /></label>
@@ -1973,6 +2016,45 @@ function App() {
           </section>
         </div>
       )}
+
+      {borrowConfirmRequest && (
+        <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setBorrowConfirmRequest(null)}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="borrow-confirm-title">
+            <header><div><p className="eyebrow">库存借用</p><h2 id="borrow-confirm-title">确认借用信息</h2></div><button className="icon-button" onClick={() => setBorrowConfirmRequest(null)} aria-label="关闭"><X size={20} /></button></header>
+            <p>请核对本次借用的物品和数量，确认后提交：</p>
+            <div className="borrow-selection-list">{borrowConfirmRequest.items.map((line) => { const item = items.find((candidate) => candidate.id === line.item_id); return <div className="borrow-selection-row" key={line.item_id}><div><strong>{item?.name ?? line.item_id}</strong><small>{line.item_id}</small></div><span className="status-badge confirmed">数量 {line.quantity}</span></div>; })}</div>
+            {borrowConfirmError && <div className="page-error" role="alert"><CircleAlert size={17} /><span>{borrowConfirmError}</span></div>}
+            <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setBorrowConfirmRequest(null)}>返回修改</button><button type="button" className="primary-button" onClick={() => void submitBorrowRequest()} disabled={submitting}>{submitting ? "提交中..." : "确认提交"}</button></div>
+          </section>
+        </div>
+      )}
+
+      {borrowResultMessage && (
+        <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setBorrowResultMessage(null)}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="borrow-result-title">
+            <header><div><p className="eyebrow">库存借用</p><h2 id="borrow-result-title">借用单已提交</h2></div><button className="icon-button" onClick={() => setBorrowResultMessage(null)} aria-label="关闭"><X size={20} /></button></header>
+            <p>{borrowResultMessage}</p>
+            <div className="form-actions"><button type="button" className="primary-button" onClick={() => setBorrowResultMessage(null)}>知道了</button></div>
+          </section>
+        </div>
+      )}
+
+      {rejectOrderId !== null && (() => {
+        const rejectOrder = borrowOrders.find((order) => order.id === rejectOrderId);
+        if (!rejectOrder) return null;
+        return (
+          <div className="modal-layer" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setRejectOrderId(null)}>
+            <section className="modal" role="dialog" aria-modal="true" aria-labelledby="borrow-reject-title">
+              <header><div><p className="eyebrow">借用审批</p><h2 id="borrow-reject-title">驳回借用申请</h2></div><button className="icon-button" onClick={() => setRejectOrderId(null)} aria-label="关闭"><X size={20} /></button></header>
+              <p>驳回 <strong>{rejectOrder.orderNumber}</strong>（{userName(rejectOrder.userId)}）的借用申请，驳回理由会显示在借用人的订单上。</p>
+              <form onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("rejectReason") ?? "").trim(); if (!reason) return; void updateBorrowStatus(rejectOrderId, "cancelled", reason); }}>
+                <label><span>驳回理由（必填）</span><textarea name="rejectReason" rows={3} required maxLength={300} placeholder="例如：活动调整，本周暂不外借" autoFocus /></label>
+                <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setRejectOrderId(null)}>取消</button><button type="submit" className="danger-button" disabled={submitting}>{submitting ? "提交中..." : "确认驳回"}</button></div>
+              </form>
+            </section>
+          </div>
+        );
+      })()}
 
       {locationCorrectionLineId !== null && <div className="modal-layer">
         <section className="modal" role="dialog" aria-modal="true" aria-labelledby="location-correction-title">

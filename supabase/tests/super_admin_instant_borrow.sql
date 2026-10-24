@@ -169,5 +169,97 @@ SELECT pg_temp.instant_assert((SELECT status = 'returned'
   FROM public.borrow_orders WHERE id = (SELECT id FROM instant_test_state WHERE label = 'super_order')),
   'Another super admin completes the return review');
 
+-- 7. Rejecting a borrow order requires a reason that lands on the order.
+SELECT pg_temp.instant_actor('member');
+INSERT INTO instant_test_state(label, id)
+SELECT 'member_order2', public.create_borrow_order_batch(
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'item_id', (SELECT item_id FROM instant_test_state WHERE label = 'test_item'), 'quantity', 1)),
+  'reject reason test', CURRENT_DATE + 1);
+SELECT pg_temp.instant_actor('admin');
+SELECT pg_temp.instant_reject('SELECT public.update_borrow_order_status(
+  (SELECT id FROM instant_test_state WHERE label = ''member_order2''), ''cancelled'')',
+  'A rejection reason is required');
+SELECT public.update_borrow_order_status((SELECT id FROM instant_test_state WHERE label = 'member_order2'),
+  'cancelled', '数量不足，暂不外借');
+SELECT pg_temp.instant_assert((SELECT status = 'cancelled' AND notes = '数量不足，暂不外借'
+  FROM public.borrow_orders WHERE id = (SELECT id FROM instant_test_state WHERE label = 'member_order2')),
+  'Rejection reason is stored on the order');
+
+-- 8. Activities can opt out of approval: linked orders borrow instantly for every role.
+SELECT pg_temp.instant_actor('admin');
+WITH new_activity AS (
+  INSERT INTO public.activities(name, department_id, status, auto_approve_borrows, created_by)
+  VALUES ('Instant test activity', (SELECT department_id FROM instant_test_users WHERE label = 'admin'),
+    'active', TRUE, (SELECT app_id FROM instant_test_users WHERE label = 'admin'))
+  RETURNING id
+)
+INSERT INTO instant_test_state(label, id) SELECT 'auto_activity', id FROM new_activity;
+SELECT pg_temp.instant_actor('member');
+INSERT INTO instant_test_state(label, id)
+SELECT 'member_activity_order', public.create_borrow_order_batch(
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'item_id', (SELECT item_id FROM instant_test_state WHERE label = 'test_item'), 'quantity', 1)),
+  'activity auto approve', CURRENT_DATE + 1, NULL,
+  (SELECT id FROM instant_test_state WHERE label = 'auto_activity'));
+SELECT pg_temp.instant_assert((SELECT status = 'borrowed' AND borrowed_at IS NOT NULL
+  FROM public.borrow_orders WHERE id = (SELECT id FROM instant_test_state WHERE label = 'member_activity_order')),
+  'Auto-approve activity borrows instantly for members');
+-- operation_logs are super-admin-readable only; switch actor before the audit assert.
+SELECT pg_temp.instant_actor('super');
+SELECT pg_temp.instant_assert((SELECT count(*) = 1 FROM public.operation_logs
+  WHERE order_id = (SELECT id FROM instant_test_state WHERE label = 'member_activity_order')
+    AND details ->> 'auto_source' = 'activity'), 'Activity auto borrow is audit marked');
+SELECT pg_temp.instant_actor('admin');
+INSERT INTO instant_test_state(label, id)
+SELECT 'admin_activity_order', public.create_borrow_order_batch(
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'item_id', (SELECT item_id FROM instant_test_state WHERE label = 'test_item'), 'quantity', 1)),
+  'activity auto approve admin', CURRENT_DATE + 1, NULL,
+  (SELECT id FROM instant_test_state WHERE label = 'auto_activity'));
+SELECT pg_temp.instant_assert((SELECT status = 'borrowed'
+  FROM public.borrow_orders WHERE id = (SELECT id FROM instant_test_state WHERE label = 'admin_activity_order')),
+  'Auto-approve activity borrows instantly for admins');
+-- Returns of auto-approved orders still go through the shared review flow.
+SELECT pg_temp.instant_actor('member');
+INSERT INTO instant_test_state(label, id)
+SELECT 'member_activity_return', public.submit_borrow_return_request(
+  (SELECT id FROM instant_test_state WHERE label = 'member_activity_order'),
+  (SELECT jsonb_agg(jsonb_build_object('borrow_item_id', id, 'returned_location_code', borrow_location_code,
+    'scanned_qr_payload', '513-warehouse:' || borrow_location_code, 'item_condition', 'good'))
+   FROM public.borrow_items WHERE order_id = (SELECT id FROM instant_test_state WHERE label = 'member_activity_order')));
+SELECT pg_temp.instant_actor('admin');
+SELECT public.review_borrow_return_request((SELECT id FROM instant_test_state WHERE label = 'member_activity_return'), TRUE);
+SELECT pg_temp.instant_assert((SELECT status = 'returned'
+  FROM public.borrow_orders WHERE id = (SELECT id FROM instant_test_state WHERE label = 'member_activity_order')),
+  'Auto-approved activity order still reviews returns');
+
+-- 9. A lone active super admin may accept their own return request.
+SELECT pg_temp.instant_actor('super');
+INSERT INTO instant_test_state(label, id)
+SELECT 'super_order2', public.create_borrow_order_batch(
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'item_id', (SELECT item_id FROM instant_test_state WHERE label = 'test_item'), 'quantity', 1)),
+  'lone super return test', CURRENT_DATE + 1);
+INSERT INTO instant_test_state(label, id)
+SELECT 'super_return2', public.submit_borrow_return_request(
+  (SELECT id FROM instant_test_state WHERE label = 'super_order2'),
+  (SELECT jsonb_agg(jsonb_build_object('borrow_item_id', id, 'returned_location_code', borrow_location_code,
+    'scanned_qr_payload', '513-warehouse:' || borrow_location_code, 'item_condition', 'good'))
+   FROM public.borrow_items WHERE order_id = (SELECT id FROM instant_test_state WHERE label = 'super_order2')));
+-- With another active super admin, self review stays rejected.
+SELECT pg_temp.instant_actor('super');
+SELECT pg_temp.instant_reject('SELECT public.review_borrow_return_request(
+  (SELECT id FROM instant_test_state WHERE label = ''super_return2''), TRUE)', 'own return');
+-- Deactivate every other active super admin (fixtures and any pre-existing
+-- accounts in the test database); the lone super admin can now self-review.
+UPDATE public.users SET is_active = FALSE
+WHERE role = 'super_admin' AND is_active
+  AND id <> (SELECT app_id FROM instant_test_users WHERE label = 'super');
+SELECT public.review_borrow_return_request((SELECT id FROM instant_test_state WHERE label = 'super_return2'), TRUE);
+SELECT pg_temp.instant_assert((SELECT status = 'returned'
+  FROM public.borrow_orders WHERE id = (SELECT id FROM instant_test_state WHERE label = 'super_order2')),
+  'Lone super admin can accept their own return');
+
 RESET ROLE;
 ROLLBACK;

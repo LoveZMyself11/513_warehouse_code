@@ -24,6 +24,11 @@
 | 超管一键重置密码（补丁 1 追加） | 忘记密码只能由开发者在 Supabase Dashboard 手工处理 | 人员列表每行新增「重置密码」按钮 + 确认弹窗；密码重置回初始密码 513base123，同时 `must_change_password=true`、`password_changed_at` 清空，该账号下次登录（含已登录会话刷新后）强制进入「设置新密码」界面；本人与未关联 Auth 的账号按钮禁用，服务端同样拦截 | `supabase/functions/manage-accounts/index.ts`（`reset_password` 动作）、`src/pages/InventoryPage.tsx` | API 级：重置后旧密码被拒、初始密码可登录、门禁标记生效；浏览器：重置 → 登录 → 强制改密页 → 完成改密进入工作台（截图 patch1-password-reset.png、patch1-forced-password-change.png） |
 | 超级管理员借用免审核直借（补丁 2） | 超级管理员的借用单需要另一名超级管理员审批才能借出 | 超管提交借用单时由 `create_borrow_order_batch` 直接写入 `borrowed`（含 `borrowed_at`、`borrow_items.borrow_location_code` 由既有触发器快照），可借数量/并发锁校验与普通提交完全一致；审计日志标记 `auto_borrowed=true`。普通用户/部门管理员的审批链不变（普通用户本部门管理员批准即借出、部门管理员由超管批准，均维持既有单级「审批即借出」逻辑，`update_borrow_order_status` 未改动）；归还流程三身份一致，未改动 | `supabase/migrations/20261024100000_super_admin_instant_borrow.sql`、`src/pages/InventoryPage.tsx`、`docs/WORKFLOWS.md` | 新增 SQL 回归 `supabase/tests/super_admin_instant_borrow.sql` 全部断言通过；浏览器：超管提交后订单立即「借出中」并出现免审核提示（截图 patch2-super-instant-borrow.png），部门管理员提交仍为「待审批」、由超管批准后借出 |
 | 前端借用提示适配（补丁 2） | 提交后统一显示「等待管理员审批」 | 超管提交显示「超级管理员借用免审核，已直接借出…」，其余身份文案不变；借用弹窗对超管增加免审核说明 | `src/pages/InventoryPage.tsx` | 浏览器走查 |
+| 唯一超管自验归还（负责人选定方案 C） | 只剩一名启用超管时，其归还申请无人可验收，库存被永久占用 | `review_borrow_return_request` 放宽：当操作者是该归还单的借用人且系统仅剩一名启用超管时允许自验收；其余自审场景照旧拒绝；审计日志标记 `self_reviewed_lone_super_admin` | `supabase/migrations/20261024110000_borrow_review_rules.sql` | SQL 回归：两名超管时自审被拒、停用其余超管后自审通过且订单归还 |
+| 借用审批按钮文字化 + 驳回必填理由 | 借用审批的拒绝是一个 ✗ 图标按钮，无理由、借用人看不到结果原因 | 审批按钮改为「确认借出」「驳回」文字按钮；驳回弹出必填理由弹窗，RPC 强制校验（缺理由 400），理由写入订单 `notes` 并在借用人的订单行显示「驳回理由：…」 | 同上迁移、`src/pages/InventoryPage.tsx` | SQL 回归：无理由驳回被拒、带理由取消且 notes 落库；浏览器：admin01 的被驳回订单显示理由 |
+| 借用提交确认 + 直系上级提示 | 借用单一键提交无核对环节；提交后只有一行提示，忘记密码的流程外沟通缺少指引 | 所有身份提交借用单先弹出确认窗（仅物品与数量，可返回修改）；确认后弹出结果窗：普通用户「请联系：本部门管理员」、部门管理员「请联系：主席团」、超管「超级管理员免审」、免审活动「「活动名」活动免审」 | `src/pages/InventoryPage.tsx` | 浏览器：超管/部门管理员/免审活动三种结果文案均验证（截图 patch2x-borrow-confirm.png、patch2x-borrow-result-super.png） |
+| 活动借用免审（负责人下一补丁） | 大型活动期间大量借用单逐单审批，对部门管理员与超管压力大 | 活动表新增 `auto_approve_borrows`；活动编辑页仅超管可勾选「该活动借用免审」；关联免审活动的借用单任何身份提交后直接借出（数量/并发校验一致，审计 `auto_source='activity'`）；借用弹窗活动下拉显示「（免审）」标记，活动卡片显示免审徽标；归还仍走统一验收 | `supabase/migrations/20261024120000_activity_auto_approve.sql`、`src/pages/InventoryPage.tsx` | SQL 回归：member/admin 关联免审活动直借、`auto_source` 审计、归还仍需验收；浏览器：创建免审活动→关联提交→直借结果提示 |
+| 顶栏统计可点击 | 登录后顶栏「N 个待审批 / N 个借用待处理」只是文字，无法点击 | 改为按钮：待审批→物品审批（我的申请），借用待处理→借用监管（借用状态），成员的借用流程/未归还→借用状态 | `src/pages/InventoryPage.tsx`、`src/styles/main.css` | 浏览器：admin01 点击「个待审批」跳到「我的申请」 |
 | 非超管视图不受影响 | 部门管理员原可编辑本部门成员资料 | 保持原样：仅本部门普通用户、仅「编辑」；新增/删除入口只对 super_admin 渲染 | `src/pages/InventoryPage.tsx` | admin01 登录验证：无新增/删除按钮，仅见组织部成员 |
 | 表单校验与导入规则一致 | — | 新增 `src/lib/accountAdmin.ts`：学号/姓名/部门/手机号/身份/邮箱/职位/备注校验 + 角色分组排序纯函数，服务端 `manage-accounts` 使用相同规则（与 import-accounts 的行校验逐条一致） | `src/lib/accountAdmin.ts`、`tests/accountAdmin.test.mjs` | `npm run test:auth-storage`（新增 4 个用例） |
 
@@ -32,6 +37,11 @@
 ## 数据库、函数与配置
 
 - **补丁 2 新迁移 `20261024100000_super_admin_instant_borrow.sql`**：仅 `CREATE OR REPLACE FUNCTION public.create_borrow_order_batch`（重定义，函数签名不变），末尾 `NOTIFY pgrst, 'reload schema'`。无表结构、RLS、Storage、Auth 变更；不触碰既有业务数据。函数替换为瞬时操作，不锁业务表；旧前端继续可调用（非超管行为完全不变；超管提交后旧文案会显示「等待审批」但订单实际已借出，仅文案差异）。回退方案：重放上一版函数定义（20261013063513 中的版本）即可；过渡期若存在超管的 pending 旧单，仍可由另一名超管按原流程审批，无卡单风险。
+- **补丁 3 批次新迁移**：
+  - `20261024110000_borrow_review_rules.sql`：重定义 `review_borrow_return_request`（唯一超管自验放宽，其余逻辑逐行保留）与 `update_borrow_order_status`（取消必填理由，其余逻辑逐行保留）。无表结构变更。
+  - `20261024120000_activity_auto_approve.sql`：`activities` 新增 `auto_approve_borrows BOOLEAN NOT NULL DEFAULT FALSE`（纯加列，旧行为默认不变），重定义 `create_borrow_order_batch`（活动校验改为读取免审标记；免审活动或超管身份 → 直接借出）。无其他表结构、RLS、Storage、Auth 变更。
+  - 回退方案：分别重放 20261007103248 / 20261007104410 / 20261013063513 / 20261024100000 中的对应函数定义即回到前一行为；`auto_approve_borrows` 列可保留不影响旧逻辑。过渡期兼容：旧前端提交免审活动借用会直接借出但提示文案仍显示「等待审批」，属文案差异，前后端应一同发布。
+- **补丁 3 批次之前各迁移/函数说明见上文**（20261024100000、manage-accounts、config.toml）。
 - **补丁 1 追加 `reset_password` 与既有门禁的关系**：复用 `users_protect_password_change_flag` 触发器（service 上下文可写 `must_change_password`）与 `change-initial-password` 改密函数，未新增任何 SQL 对象；重置通过 `auth.admin.updateUserById` 改回初始密码，语义与新建账号一致。已登录的旧会话在其前端下次加载资料时同样被门禁拦截（`ProtectedRoute` 按 `must_change_password` 渲染改密页）。
 - **补丁 1 新增 `supabase/functions/manage-accounts`**（动作 `create` / `delete` / `reset_password`）。鉴权与 `import-accounts` 完全同构：Bearer JWT → `auth.admin.getUser` → 校验 `users` 行 `is_active && role='super_admin' && !must_change_password`，否则 401/403。未改动既有三个函数与 `_shared/accounts.ts`（仅 import 其既有导出），`import-accounts` 部署产物不受影响。
 - **`supabase/config.toml`**：新增 `[functions.manage-accounts] verify_jwt = false`，与既有三个账户函数一致（函数内部自行校验调用者身份）。
@@ -45,6 +55,7 @@
 - 实际执行的命令与退出状态（2026-10-24，全部在本机执行，退出码 0）：
   - `npm ci`；`npm run check`（tsc + vite build）✓；`npm run test:auth-storage` → 18 tests / 18 pass / 0 fail（含新增 4 例）✓；`git diff --check` ✓
   - 补丁 2：SQL 回归 4 份全部 PASS——`workflow_approvals`、`concrete_borrow_locations`、`counted_inventory`（既有三份，验证未破坏既有矩阵）与新增 `super_admin_instant_borrow`（覆盖：超管直借状态/借出位置/审计标记/即时占用、超量拒绝、member 单管理员批准即借出、跨部门管理员拒绝、member 调用审批被管理员门禁拦截、admin 单自批拒绝/跨部门拒绝/超管批准、超管仍可批 member 单、超管归还走同一流程且需另一名超管验收、部门管理员不能验收超管归还）
+  - 补丁 3 批次：上述回归继续全 PASS，`super_admin_instant_borrow` 新增断言——无理由驳回被拒/带理由取消且 notes 落库、member 与 admin 关联免审活动直借且 `auto_source='activity'` 审计、免审活动订单归还仍需验收、两名超管时自验被拒、停用其余超管后唯一超管自验通过；既有 `counted_inventory`、`concrete_borrow_locations` 中两处无理由取消调用已按新规则补上测试理由（行为变更的预期适配）
 - 测试库标识：**本机 Docker 全新本地 Supabase 栈**（`supabase start`，API `http://127.0.0.1:54321`，项目 id `513base-hub`），与生产完全隔离。按 `docs/GETTING_STARTED.md` 顺序手工执行 4 个基础脚本 + 全部 9 条迁移（含 20261024100000），seed.sql 已加载，迁移历史登记到 `supabase_migrations.schema_migrations`。**环境修正**：本地库 seed 后 `inventory_item_number_seq` 未推进导致新增审批建号撞 ITEM0001（生产不存在此问题，正式库序列已初始化），已 `setval` 至 9200 后重跑全部回归。栈持续运行，dev server 在 `http://127.0.0.1:5175`（`.env.local` 指向本地栈）。
 - Edge Function API 级验证（curl 直调本地函数网关）：
   - create：member/admin/super_admin 三身份成功（userId 2/3/4，部门自动 upsert，`must_change_password=true`）；学号重复 409；手机号非法 400；身份非法 400；无凭据 401
@@ -59,7 +70,9 @@
   - `docs/images/zcode/patch1-password-reset.png`：重置密码成功提示与每行「重置密码」按钮（本人禁用）
   - `docs/images/zcode/patch1-forced-password-change.png`：被重置账号用初始密码登录后强制进入的「设置新密码」界面
   - `docs/images/zcode/patch2-super-instant-borrow.png`：超管提交借用单后订单直接「借出中」与免审核提示
-- 浏览器 GUI 走查（ZCode 内置浏览器）：超管分组顺序与人数、建号→入组、删除→空组、弹窗内校验错误（无效手机号）、admin01 受限视图（无新增/删除入口，仅本部门 member、仅编辑）、重置密码→初始密码登录→强制改密页→完成改密进入工作台、补丁 2 超管直借即时「借出中」、部门管理员借用待审批→超管批准→借出中，均通过。
+  - `docs/images/zcode/patch2x-borrow-confirm.png`：借用提交前的物品/数量确认弹窗
+  - `docs/images/zcode/patch2x-borrow-result-super.png`：超管提交后的免审结果弹窗（借出中订单在背后可见）
+- 浏览器 GUI 走查（ZCode 内置浏览器）：超管分组顺序与人数、建号→入组、删除→空组、弹窗内校验错误（无效手机号）、admin01 受限视图（无新增/删除入口，仅本部门 member、仅编辑）、重置密码→初始密码登录→强制改密页→完成改密进入工作台、补丁 2 超管直借即时「借出中」、部门管理员借用待审批→超管批准→借出中、补丁 3 确认弹窗与三种提交结果文案（主席团/超管免审/活动免审）、免审活动创建与徽标、借用审批「确认借出/驳回」按钮、驳回必填理由且借用人订单显示理由、顶栏统计点击跳转，均通过。
 - **未测试项 / 已知风险**：
   1. 手机端布局未实测（无真实设备）；分组标题与按钮使用了既有响应式类，小屏表现建议发布前抽查。
   2. 并发互删（两名超管同时删除对方）理论上可导致无启用超管；现有护栏不覆盖此竞态。如需绝对保证，可后续增加 DB 触发器（属新 migration，本补丁未做）。
@@ -67,7 +80,9 @@
   4. Edge Function 为 Deno 运行时，本机 tsc 不覆盖 `supabase/functions/`（与既有三函数一致），已人工比对 import-accounts 的 API 用法并在本地栈实跑验证。
   5. 删除的 Auth 账号其历史 `operation_logs.user_id`、`borrow_orders.return_delegate_id` 等引用按既有外键置 NULL，属预期行为。
   6. 补丁 2 归还流程未做浏览器端到端（桌面无摄像头扫码），代码零改动且由 SQL 回归覆盖（含超管归还验收路径）；借用提交的手机端表现同未实测。
-  7. 补丁 2 免审核直借没有撤销窗口：超管误提交的订单只能按正常流程提交归还申请再验收（负责人要求归还三身份一致）。
+  7. 补丁 2 免审核直借没有撤销窗口：超管误提交的订单只能按正常流程提交归还申请再验收（负责人要求归还三身份一致）；负责人后续以提交前确认弹窗缓解误提交，未做时限撤销。
+  8. 补丁 3 的「请联系：本部门管理员」未显示管理员姓名——成员受 RLS 限制读不到管理员资料；如需显示姓名须新增受控 RPC，本批未做。
+  9. 补丁 3 唯一超管自验归还的判定是「全局启用超管数 ≤ 1」，与部门无关；两名超管互为备份时始终要求交叉验收。
 - 确认：**没有对生产写入**（生产库、生产函数、生产静态站均未触碰），**没有 push、没有 PR、没有部署、没有账号导入**；所有验证都在本机隔离栈与本地 commit。
 
 ## Codex 发布建议

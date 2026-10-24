@@ -77,7 +77,7 @@ SELECT pg_temp.location_reject('SELECT public.update_borrow_order_status((SELECT
   'official QR-supported location');
 SELECT pg_temp.location_assert((SELECT status = 'pending' AND borrowed_at IS NULL FROM public.borrow_orders
   WHERE id = (SELECT id FROM location_test_state WHERE label = 'moving')), 'Approval failure preserves pending status');
-SELECT public.update_borrow_order_status((SELECT id FROM location_test_state WHERE label = 'cancel'), 'cancelled');
+SELECT public.update_borrow_order_status((SELECT id FROM location_test_state WHERE label = 'cancel'), 'cancelled', 'location test cancellation');
 SELECT pg_temp.location_actor('super');
 SELECT public.update_inventory_item(item_id, 'Moving test', 'C3', '1') FROM location_test_state WHERE label = 'moving';
 SELECT pg_temp.location_actor('admin');

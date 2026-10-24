@@ -716,3 +716,10 @@ code { color: #385148; font-family: "SFMono-Regular", Consolas, monospace; font-
 .user-group-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .user-group-heading small { color: #87918d; font-size: 11px; }
 .user-group-heading .compact-button { margin-left: auto; }
+
+/* 顶栏统计可点击跳转 */
+.topbar-stat { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; margin: 0; border: none; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.topbar-stat:hover { background: rgba(255, 255, 255, 0.12); }
+
+/* 活动卡片免审标记 */
+.activity-free-badge { margin-left: 8px; vertical-align: 2px; }
